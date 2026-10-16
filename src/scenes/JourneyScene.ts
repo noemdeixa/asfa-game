@@ -1,6 +1,6 @@
 import type { Scene, SceneManager } from '../core/SceneManager';
 import { STATIONS, SEGMENTS, type Station } from '../data/network';
-import { buildAdjacency, type Neighbour } from '../domain/graph';
+import { buildAdjacency, segmentDurationSec, type Neighbour } from '../domain/graph';
 
 export type JourneyDifficulty = 'full-map' | 'nearby' | 'station-names';
 
@@ -8,6 +8,22 @@ const MIN_LATITUDE = Math.min(...STATIONS.map(station => station.latitude));
 const MAX_LATITUDE = Math.max(...STATIONS.map(station => station.latitude));
 const MIN_LONGITUDE = Math.min(...STATIONS.map(station => station.longitude));
 const MAX_LONGITUDE = Math.max(...STATIONS.map(station => station.longitude));
+const MAP_WIDTH = 1000;
+const MAP_HEIGHT = 700;
+const MAP_STATION_MARGIN_X = 50;
+const MAP_STATION_MARGIN_Y = 85;
+const MAP_STATION_WIDTH = MAP_WIDTH - MAP_STATION_MARGIN_X * 2;
+const MAP_STATION_HEIGHT = MAP_HEIGHT - MAP_STATION_MARGIN_Y * 2;
+const MIN_ZOOM = 1;
+const MAX_ZOOM = 4;
+
+type StationLabel = {
+	x: number;
+	y: number;
+	lines: string[];
+	width: number;
+	height: number;
+};
 
 export class JourneyScene implements Scene {
 	private adjacency = buildAdjacency(STATIONS, SEGMENTS);
@@ -18,6 +34,11 @@ export class JourneyScene implements Scene {
 	private finished = false;
 	private root: HTMLElement | null = null;
 	private manager: SceneManager;
+	private zoom = MIN_ZOOM;
+	private mapCenterX = MAP_WIDTH / 2;
+	private mapCenterY = MAP_HEIGHT / 2;
+	private mapInteractionController: AbortController | null = null;
+	private suppressMapClick = false;
 
 	constructor(manager: SceneManager) {
 		this.manager = manager;
@@ -31,13 +52,21 @@ export class JourneyScene implements Scene {
 			if (typeof currentId !== 'string' || !STATIONS.some(station => station.id === currentId)
 				|| typeof objectiveId !== 'string' || !STATIONS.some(station => station.id === objectiveId)
 				|| (difficulty !== 'full-map' && difficulty !== 'nearby' && difficulty !== 'station-names')
-				|| typeof elapsedSec !== 'number' || !Number.isFinite(elapsedSec)) {
+				|| typeof elapsedSec !== 'number' || !Number.isFinite(elapsedSec)
+				|| ('zoom' in params && (typeof params.zoom !== 'number' || !Number.isFinite(params.zoom)))
+				|| ('mapCenterX' in params && (typeof params.mapCenterX !== 'number' || !Number.isFinite(params.mapCenterX)))
+				|| ('mapCenterY' in params && (typeof params.mapCenterY !== 'number' || !Number.isFinite(params.mapCenterY)))) {
 				throw new Error('Journey scene received invalid journey parameters.');
 			}
 			this.currentId = currentId;
 			this.objectiveId = objectiveId;
 			this.difficulty = difficulty;
 			this.elapsedSec = elapsedSec;
+			this.zoom = 'zoom' in params && typeof params.zoom === 'number' ? params.zoom : MIN_ZOOM;
+			this.mapCenterX = 'mapCenterX' in params && typeof params.mapCenterX === 'number'
+				? params.mapCenterX : MAP_WIDTH / 2;
+			this.mapCenterY = 'mapCenterY' in params && typeof params.mapCenterY === 'number'
+				? params.mapCenterY : MAP_HEIGHT / 2;
 			this.finished = this.currentId === this.objectiveId;
 		} else {
 			if (typeof params === 'object' && params !== null && 'difficulty' in params
@@ -58,6 +87,9 @@ export class JourneyScene implements Scene {
 		}
 		this.currentId = origin;
 		this.objectiveId = destination;
+		const initialStationPosition = this.position(this.stationById(origin));
+		this.mapCenterX = initialStationPosition.x;
+		this.mapCenterY = initialStationPosition.y;
 		this.elapsedSec = 0;
 		this.finished = false;
 	}
@@ -75,12 +107,14 @@ export class JourneyScene implements Scene {
 	}
 
 	private travelTo(neighbour: Neighbour): void {
-		this.manager.switchTo('drive', {
-			fromId: this.currentId,
-			toId: neighbour.station.id,
+		this.manager.switchTo('journey', {
+			currentId: neighbour.station.id,
 			objectiveId: this.objectiveId,
 			difficulty: this.difficulty,
-			elapsedSec: this.elapsedSec,
+			elapsedSec: this.elapsedSec + segmentDurationSec(neighbour.segment, STATIONS),
+			zoom: this.zoom,
+			mapCenterX: this.mapCenterX,
+			mapCenterY: this.mapCenterY,
 		});
 	}
 
@@ -93,6 +127,7 @@ export class JourneyScene implements Scene {
 
 	private paint(): void {
 		if (!this.root) return;
+		this.mapInteractionController?.abort();
 		const current = this.stationById(this.currentId);
 		const objective = this.stationById(this.objectiveId);
 
@@ -110,7 +145,14 @@ export class JourneyScene implements Scene {
 			: ''}
 			<button id="menu">Back to menu</button>
 			${this.difficulty === 'station-names' && !this.finished ? this.renderStationChoices() : ''}
-			<svg id="map" viewBox="0 0 1000 700" xmlns="http://www.w3.org/2000/svg">
+			<div class="map-controls" aria-label="Map zoom controls">
+				<button id="zoom-out" type="button" aria-label="Zoom out">−</button>
+				<output id="zoom-level">${Math.round(this.zoom * 100)}%</output>
+				<button id="zoom-in" type="button" aria-label="Zoom in">+</button>
+				<button id="zoom-reset" type="button">Reset zoom</button>
+				<span class="map-pan-hint">Drag to pan</span>
+			</div>
+			<svg id="map" viewBox="${this.viewBoxForZoom()}" xmlns="http://www.w3.org/2000/svg">
 			${this.renderSegments()}
 			${this.renderStations()}
 			</svg>
@@ -148,6 +190,116 @@ export class JourneyScene implements Scene {
 		this.root.querySelector<HTMLButtonElement>('#menu')?.addEventListener('click', () => {
 			this.manager.switchTo('menu', { difficulty: this.difficulty });
 		});
+		this.root.querySelector<HTMLButtonElement>('#zoom-in')?.addEventListener('click', () => {
+			this.setZoom(this.zoom * 1.25);
+		});
+		this.root.querySelector<HTMLButtonElement>('#zoom-out')?.addEventListener('click', () => {
+			this.setZoom(this.zoom / 1.25);
+		});
+		this.root.querySelector<HTMLButtonElement>('#zoom-reset')?.addEventListener('click', () => {
+			this.mapCenterX = MAP_WIDTH / 2;
+			this.mapCenterY = MAP_HEIGHT / 2;
+			this.setZoom(MIN_ZOOM);
+		});
+		const map = this.root.querySelector<SVGSVGElement>('#map');
+		if (!map) throw new Error('Journey map SVG was not rendered.');
+		map.addEventListener('wheel', event => {
+			event.preventDefault();
+			this.setZoom(this.zoom * (event.deltaY < 0 ? 1.15 : 1 / 1.15));
+		});
+		const controller = new AbortController();
+		this.mapInteractionController = controller;
+		let drag: {
+			pointerId: number;
+			startX: number;
+			startY: number;
+			centerX: number;
+			centerY: number;
+			moved: boolean;
+		} | null = null;
+		map.addEventListener('pointerdown', event => {
+			if (!this.canPanMap() || event.button !== 0) return;
+			drag = {
+				pointerId: event.pointerId,
+				startX: event.clientX,
+				startY: event.clientY,
+				centerX: this.mapCenterX,
+				centerY: this.mapCenterY,
+				moved: false,
+			};
+			map.classList.add('is-panning');
+		});
+		window.addEventListener('pointermove', event => {
+			if (!drag || drag.pointerId !== event.pointerId) return;
+			if (!(event.buttons & 1)) return;
+			const bounds = map.getBoundingClientRect();
+			if (bounds.width === 0 || bounds.height === 0) return;
+			const deltaX = event.clientX - drag.startX;
+			const deltaY = event.clientY - drag.startY;
+			if (Math.abs(deltaX) + Math.abs(deltaY) > 3) drag.moved = true;
+			const viewWidth = MAP_WIDTH / this.zoom;
+			const viewHeight = MAP_HEIGHT / this.zoom;
+			this.mapCenterX = this.clampMapCenterX(drag.centerX - deltaX * viewWidth / bounds.width);
+			this.mapCenterY = this.clampMapCenterY(drag.centerY - deltaY * viewHeight / bounds.height);
+			map.setAttribute('viewBox', this.viewBoxForZoom());
+		}, { signal: controller.signal });
+		const endDrag = (event: PointerEvent) => {
+			if (!drag || drag.pointerId !== event.pointerId) return;
+			this.suppressMapClick = drag.moved;
+			map.classList.remove('is-panning');
+			if (drag.moved) {
+				window.setTimeout(() => { this.suppressMapClick = false; }, 0);
+			}
+			drag = null;
+		};
+		window.addEventListener('pointerup', endDrag, { signal: controller.signal });
+		window.addEventListener('pointercancel', endDrag, { signal: controller.signal });
+		map.addEventListener('click', event => {
+			if (!this.suppressMapClick) return;
+			event.preventDefault();
+			event.stopPropagation();
+			this.suppressMapClick = false;
+		}, true);
+		this.setZoom(this.zoom);
+	}
+
+	private viewBoxForZoom(): string {
+		const width = MAP_WIDTH / this.zoom;
+		const height = MAP_HEIGHT / this.zoom;
+		return `${this.mapCenterX - width / 2} ${this.mapCenterY - height / 2} ${width} ${height}`;
+	}
+
+	private clampMapCenterX(center: number): number {
+		if (this.zoom <= MIN_ZOOM) return Math.max(0, Math.min(MAP_WIDTH, center));
+		const halfWidth = MAP_WIDTH / this.zoom / 2;
+		return Math.max(halfWidth, Math.min(MAP_WIDTH - halfWidth, center));
+	}
+
+	private clampMapCenterY(center: number): number {
+		if (this.zoom <= MIN_ZOOM) return Math.max(0, Math.min(MAP_HEIGHT, center));
+		const halfHeight = MAP_HEIGHT / this.zoom / 2;
+		return Math.max(halfHeight, Math.min(MAP_HEIGHT - halfHeight, center));
+	}
+
+	private canPanMap(): boolean {
+		return this.zoom > MIN_ZOOM
+			|| this.mapCenterX !== MAP_WIDTH / 2
+			|| this.mapCenterY !== MAP_HEIGHT / 2;
+	}
+
+	private setZoom(zoom: number): void {
+		this.zoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, zoom));
+		this.mapCenterX = this.clampMapCenterX(this.mapCenterX);
+		this.mapCenterY = this.clampMapCenterY(this.mapCenterY);
+		const map = this.root?.querySelector<SVGSVGElement>('#map');
+		map?.setAttribute('viewBox', this.viewBoxForZoom());
+		map?.classList.toggle('is-draggable', this.canPanMap());
+		const level = this.root?.querySelector<HTMLOutputElement>('#zoom-level');
+		if (level) level.value = `${Math.round(this.zoom * 100)}%`;
+		const zoomOut = this.root?.querySelector<HTMLButtonElement>('#zoom-out');
+		const zoomIn = this.root?.querySelector<HTMLButtonElement>('#zoom-in');
+		if (zoomOut) zoomOut.disabled = this.zoom <= MIN_ZOOM;
+		if (zoomIn) zoomIn.disabled = this.zoom >= MAX_ZOOM;
 	}
 
 	private difficultyLabel(): string {
@@ -168,8 +320,10 @@ export class JourneyScene implements Scene {
 
 	private position(station: Station): { x: number; y: number } {
 		return {
-			x: 90 + ((station.longitude - MIN_LONGITUDE) / (MAX_LONGITUDE - MIN_LONGITUDE)) * 820,
-			y: 610 - ((station.latitude - MIN_LATITUDE) / (MAX_LATITUDE - MIN_LATITUDE)) * 500,
+			x: MAP_STATION_MARGIN_X
+				+ ((station.longitude - MIN_LONGITUDE) / (MAX_LONGITUDE - MIN_LONGITUDE)) * MAP_STATION_WIDTH,
+			y: MAP_HEIGHT - MAP_STATION_MARGIN_Y
+				- ((station.latitude - MIN_LATITUDE) / (MAX_LATITUDE - MIN_LATITUDE)) * MAP_STATION_HEIGHT,
 		};
 	}
 
@@ -177,6 +331,73 @@ export class JourneyScene implements Scene {
 		return this.difficulty !== 'nearby'
 			|| station.id === this.currentId
 			|| this.isNeighbour(station.id);
+	}
+
+	private wrapStationLabel(name: string): string[] {
+		const maxLineLength = 20;
+		const lines: string[] = [];
+		let line = '';
+		for (const word of name.split(/\s+/)) {
+			const nextLine = line ? `${line} ${word}` : word;
+			if (line && nextLine.length > maxLineLength) {
+				lines.push(line);
+				line = word;
+			} else {
+				line = nextLine;
+			}
+		}
+		if (line) lines.push(line);
+		return lines;
+	}
+
+	private stationLabelPositions(): Map<string, StationLabel> {
+		const placements = new Map<string, StationLabel>();
+		const candidates = [
+			{ dx: 0, dy: -1, anchor: 'middle' },
+			{ dx: 1, dy: -0.7, anchor: 'start' },
+			{ dx: 1, dy: 0.25, anchor: 'start' },
+			{ dx: 1, dy: 1, anchor: 'start' },
+			{ dx: 0, dy: 1, anchor: 'middle' },
+			{ dx: -1, dy: 1, anchor: 'end' },
+			{ dx: -1, dy: 0.25, anchor: 'end' },
+			{ dx: -1, dy: -0.7, anchor: 'end' },
+		];
+		for (const station of STATIONS) {
+			const { x, y } = this.position(station);
+			const lines = this.wrapStationLabel(station.name);
+			const width = Math.max(...lines.map(line => line.length)) * 7.5 + 8;
+			const height = lines.length * 16 + 4;
+			let bestPlacement: StationLabel | null = null;
+			let bestScore = Number.POSITIVE_INFINITY;
+			for (const distance of [18, 24, 32]) {
+				for (const candidate of candidates) {
+					const offsetX = candidate.dx * distance;
+					const centerX = candidate.anchor === 'start' ? x + offsetX + width / 2
+						: candidate.anchor === 'end' ? x + offsetX - width / 2
+						: x + offsetX;
+					const centerY = y + candidate.dy * distance;
+					const bounds = {
+						left: centerX - width / 2,
+						right: centerX + width / 2,
+						top: centerY - height / 2,
+						bottom: centerY + height / 2,
+					};
+					if (bounds.left < 4 || bounds.right > MAP_WIDTH - 4 || bounds.top < 4 || bounds.bottom > MAP_HEIGHT - 4) continue;
+					const stationOverlaps = STATIONS.filter(other => {
+						if (other.id === station.id) return false;
+						const position = this.position(other);
+						return bounds.left < position.x + 18 && bounds.right > position.x - 18
+							&& bounds.top < position.y + 18 && bounds.bottom > position.y - 18;
+					}).length;
+					const score = stationOverlaps * 1000 + distance;
+					if (score >= bestScore) continue;
+					bestScore = score;
+					bestPlacement = { x: centerX, y: centerY, lines, width, height };
+				}
+			}
+			if (bestPlacement) placements.set(station.id, bestPlacement);
+		}
+		return placements;
 	}
 
 	private renderSegments(): string {
@@ -192,6 +413,7 @@ export class JourneyScene implements Scene {
 	}
 
 	private renderStations(): string {
+		const labels = this.difficulty === 'station-names' ? new Map() : this.stationLabelPositions();
 		return STATIONS.filter(s => this.isVisible(s)).map(s => {
 		const isCurrent = s.id === this.currentId;
 		const isObjective = s.id === this.objectiveId;
@@ -209,13 +431,34 @@ export class JourneyScene implements Scene {
 		const interactionAttributes = canClick
 			? `role="button" tabindex="0" aria-label="Travel to ${s.name}"`
 			: '';
+		const label = labels.get(s.id);
+		let connector = '';
+		if (label) {
+			const dx = label.x - x;
+			const dy = label.y - y;
+			const distance = Math.hypot(dx, dy);
+			const startScale = 9 / distance;
+			const endScale = Math.min(
+				(label.width / 2) / Math.max(Math.abs(dx), Number.EPSILON),
+				(label.height / 2) / Math.max(Math.abs(dy), Number.EPSILON),
+			);
+			connector = `<line x1="${x + dx * startScale}" y1="${y + dy * startScale}"
+				x2="${x + dx * endScale}" y2="${y + dy * endScale}" class="station-label-connector" />`;
+		}
 
 		return `
 			<g class="station" data-id="${s.id}" style="cursor:${cursor}" ${interactionAttributes}>
 			${canClick ? `<circle cx="${x}" cy="${y}" r="24" fill="transparent" pointer-events="all" />` : ''}
-			<circle cx="${x}" cy="${y}" r="14" fill="${fill}" />
-			${showName ? `<text x="${x}" y="${y - 24}" text-anchor="middle"
-					font-size="16" fill="#e6e9ef">${s.name}</text>` : ''}
+			<circle cx="${x}" cy="${y}" r="9" fill="${fill}" />
+			${showName && label ? `<g class="station-label">
+				${connector}
+				<rect x="${label.x - label.width / 2}" y="${label.y - label.height / 2}"
+					width="${label.width}" height="${label.height}" rx="4"
+					fill="#0e1118" stroke="#354253" stroke-width="1" />
+				<text x="${label.x}" y="${label.y - label.lines.length * 8 + 12}" text-anchor="middle" font-size="14" fill="#e6e9ef">
+					${label.lines.map((line: string, index: number) => `<tspan x="${label.x}" dy="${index === 0 ? 0 : 16}">${line}</tspan>`).join('')}
+				</text>
+			</g>` : ''}
 			</g>
 		`;
 		}).join('');
@@ -223,5 +466,9 @@ export class JourneyScene implements Scene {
 
 	update(): void {}
 	render(): void {}
-	exit(): void { this.root = null; }
+	exit(): void {
+		this.mapInteractionController?.abort();
+		this.mapInteractionController = null;
+		this.root = null;
+	}
 }
