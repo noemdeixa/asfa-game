@@ -1,6 +1,7 @@
 import type { Scene, SceneManager } from '../core/SceneManager';
 import { STATIONS, SEGMENTS, type Station } from '../data/network';
 import { createDemoSignals, SIGNAL_ASPECTS, type Signal, type SignalAuxiliaryLamp, type SignalLamp } from '../domain/signals';
+import { MAX_BRAKING_KN, MAX_TRACTION_KN, TrainPhysics } from '../domain/TrainPhysics';
 import type { JourneyDifficulty } from './JourneyScene';
 
 interface DriveParams {
@@ -14,13 +15,6 @@ interface DriveParams {
 const STATION_STOP_LINE_METERS = 1200;
 const STOP_LINE_TOLERANCE_METERS = 8;
 const STOP_SPEED_TOLERANCE_KMH = 1;
-const TRAIN_MASS_KG = 400_000;
-const MAX_TRACTION_KN = 250;
-const MAX_BRAKING_KN = 350;
-const EMERGENCY_BRAKING_KN = 450;
-const ROLLING_RESISTANCE_COEFFICIENT = 0.0015;
-const AERODYNAMIC_DRAG_COEFFICIENT = 4.6;
-const EMERGENCY_BRAKE_LIMIT_KMH = 125;
 const SIGNAL_HEAD_TOP_OFFSET = 193;
 const LAMP_HEX: Record<SignalLamp['color'], string> = {
 	red: '#ff4b55',
@@ -41,10 +35,8 @@ export class DriveScene implements Scene {
 	private from: Station | null = null;
 	private to: Station | null = null;
 	private throttle = 0;
-	private speedKmh = 0;
-	private distanceMeters = 0;
+	private physics = new TrainPhysics();
 	private driveElapsedSec = 0;
-	private emergencyBrake = false;
 	private arrivedAtStation = false;
 	private missedStation = false;
 	private recognitionFeedbackSec = 0;
@@ -80,10 +72,8 @@ export class DriveScene implements Scene {
 		this.to = to;
 		this.params = { fromId, toId, objectiveId, difficulty, elapsedSec };
 		this.throttle = 0;
-		this.speedKmh = 0;
-		this.distanceMeters = 0;
+		this.physics.reset();
 		this.driveElapsedSec = 0;
-		this.emergencyBrake = false;
 		this.arrivedAtStation = false;
 		this.missedStation = false;
 		this.recognitionFeedbackSec = 0;
@@ -143,7 +133,7 @@ export class DriveScene implements Scene {
 			throw new Error('Driving controls were not created.');
 		}
 		throttleInput.addEventListener('input', () => {
-			if (this.emergencyBrake) return;
+			if (this.physics.emergencyBrakeActive) return;
 			this.throttle = Number(throttleInput.value);
 			const value = root.querySelector<HTMLElement>('#throttle-value');
 			if (value) value.textContent = this.leverDescription();
@@ -157,8 +147,8 @@ export class DriveScene implements Scene {
 	private activeSignalIndex(): number {
 		return this.signals.findIndex((signal, index) =>
 			!this.acknowledgedSignals.has(index)
-			&& signal.distance >= this.distanceMeters
-			&& signal.distance - this.distanceMeters <= 230,
+			&& signal.distance >= this.physics.distanceMeters
+			&& signal.distance - this.physics.distanceMeters <= 230,
 		);
 	}
 
@@ -172,8 +162,7 @@ export class DriveScene implements Scene {
 	}
 
 	private resetEmergencyBrake(): void {
-		if (!this.emergencyBrake || this.speedKmh > 0) return;
-		this.emergencyBrake = false;
+		if (!this.physics.resetEmergencyBrake()) return;
 		const resetButton = this.root?.querySelector<HTMLButtonElement>('#reset-brake');
 		const throttleInput = this.root?.querySelector<HTMLInputElement>('#throttle');
 		const brakeState = this.root?.querySelector<HTMLElement>('#brake-state');
@@ -196,7 +185,7 @@ export class DriveScene implements Scene {
 
 	private completeStationStop(): void {
 		this.arrivedAtStation = true;
-		this.speedKmh = 0;
+		this.physics.stopAtStation();
 		this.throttle = 0;
 		const throttleInput = this.root?.querySelector<HTMLInputElement>('#throttle');
 		const throttleValue = this.root?.querySelector<HTMLElement>('#throttle-value');
@@ -238,22 +227,8 @@ export class DriveScene implements Scene {
 
 	update(dt: number): void {
 		if (!this.root || this.arrivedAtStation) return;
-		const previousDistance = this.distanceMeters;
-		const speedMps = this.speedKmh / 3.6;
-		const tractionN = Math.max(0, this.throttle) / 100 * MAX_TRACTION_KN * 1000;
-		const brakingN = this.emergencyBrake
-			? EMERGENCY_BRAKING_KN * 1000
-			: Math.abs(Math.min(0, this.throttle)) / 100 * MAX_BRAKING_KN * 1000;
-		const rollingResistanceN = speedMps > 0
-			? TRAIN_MASS_KG * 9.81 * ROLLING_RESISTANCE_COEFFICIENT
-			: 0;
-		const aerodynamicDragN = AERODYNAMIC_DRAG_COEFFICIENT * speedMps * speedMps;
-		const resistanceN = speedMps > 0 ? rollingResistanceN + aerodynamicDragN : 0;
-		const accelerationMps2 = (tractionN - brakingN - resistanceN) / TRAIN_MASS_KG;
-		const nextSpeedMps = Math.max(0, speedMps + accelerationMps2 * dt);
-		this.speedKmh = nextSpeedMps * 3.6;
-		if (this.speedKmh > EMERGENCY_BRAKE_LIMIT_KMH && !this.emergencyBrake) {
-			this.emergencyBrake = true;
+		const { previousDistanceMeters, emergencyBrakeActivated } = this.physics.update(dt, this.throttle);
+		if (emergencyBrakeActivated) {
 			this.throttle = 0;
 			const throttleInput = this.root.querySelector<HTMLInputElement>('#throttle');
 			const throttleValue = this.root.querySelector<HTMLElement>('#throttle-value');
@@ -263,23 +238,22 @@ export class DriveScene implements Scene {
 			}
 			if (throttleValue) throttleValue.textContent = this.leverDescription();
 		}
-		if (this.emergencyBrake && this.speedKmh === 0) {
+		if (this.physics.emergencyBrakeActive && this.physics.speedKmh === 0) {
 			const resetButton = this.root.querySelector<HTMLButtonElement>('#reset-brake');
 			if (resetButton) resetButton.hidden = false;
 		}
-		const distanceStep = (speedMps + nextSpeedMps) / 2 * dt;
-		this.distanceMeters += distanceStep;
 		this.driveElapsedSec += dt;
-		if (!this.missedStation && previousDistance < STATION_STOP_LINE_METERS
-			&& this.distanceMeters >= STATION_STOP_LINE_METERS) {
-			if (this.speedKmh <= STOP_SPEED_TOLERANCE_KMH
-				&& Math.abs(this.distanceMeters - STATION_STOP_LINE_METERS) <= STOP_LINE_TOLERANCE_METERS) {
+		// A frame may cross the stopping marker, so judge both its endpoints.
+		if (!this.missedStation && previousDistanceMeters < STATION_STOP_LINE_METERS
+			&& this.physics.distanceMeters >= STATION_STOP_LINE_METERS) {
+			if (this.physics.speedKmh <= STOP_SPEED_TOLERANCE_KMH
+				&& Math.abs(this.physics.distanceMeters - STATION_STOP_LINE_METERS) <= STOP_LINE_TOLERANCE_METERS) {
 				this.completeStationStop();
 			} else {
 				this.markStationMissed();
 			}
-		} else if (!this.missedStation && this.speedKmh <= STOP_SPEED_TOLERANCE_KMH
-			&& Math.abs(this.distanceMeters - STATION_STOP_LINE_METERS) <= STOP_LINE_TOLERANCE_METERS) {
+		} else if (!this.missedStation && this.physics.speedKmh <= STOP_SPEED_TOLERANCE_KMH
+			&& Math.abs(this.physics.distanceMeters - STATION_STOP_LINE_METERS) <= STOP_LINE_TOLERANCE_METERS) {
 			this.completeStationStop();
 		}
 		const speed = this.root.querySelector<HTMLElement>('#speed');
@@ -289,12 +263,12 @@ export class DriveScene implements Scene {
 		const signalStatus = this.root.querySelector<HTMLElement>('#signal-status');
 		const brakeState = this.root.querySelector<HTMLElement>('#brake-state');
 		this.recognitionFeedbackSec = Math.max(0, this.recognitionFeedbackSec - dt);
-		if (speed) speed.textContent = Math.round(this.speedKmh).toString();
+		if (speed) speed.textContent = Math.round(this.physics.speedKmh).toString();
 		const cabSpeed = this.root.querySelector<HTMLElement>('#cab-speed');
-		if (cabSpeed) cabSpeed.textContent = Math.round(this.speedKmh).toString();
-		if (distance) distance.textContent = Math.round(this.distanceMeters).toString();
-		if (brakeState && this.emergencyBrake) {
-			brakeState.textContent = this.speedKmh > 0
+		if (cabSpeed) cabSpeed.textContent = Math.round(this.physics.speedKmh).toString();
+		if (distance) distance.textContent = Math.round(this.physics.distanceMeters).toString();
+		if (brakeState && this.physics.emergencyBrakeActive) {
+			brakeState.textContent = this.physics.speedKmh > 0
 				? 'FRENO DE EMERGENCIA · BRAKING'
 				: 'FRENO DE EMERGENCIA · STOPPED';
 			brakeState.classList.add('is-emergency');
@@ -311,7 +285,7 @@ export class DriveScene implements Scene {
 			signalStatus.textContent = 'No hay señal que reconocer.';
 		}
 
-		if (this.missedStation && this.speedKmh <= STOP_SPEED_TOLERANCE_KMH && outcome?.hidden) {
+		if (this.missedStation && this.physics.speedKmh <= STOP_SPEED_TOLERANCE_KMH && outcome?.hidden) {
 			outcome.hidden = false;
 			const message = this.root.querySelector<HTMLElement>('#station-outcome-message');
 			if (message && this.to) {
@@ -341,8 +315,8 @@ export class DriveScene implements Scene {
 		ctx.beginPath();
 		ctx.arc(805, 67, 34, 0, Math.PI * 2);
 		ctx.fill();
-		this.drawCloud(110 - (this.distanceMeters * 0.018 % 1200), 73, 1.05);
-		this.drawCloud(540 - (this.distanceMeters * 0.01 % 1200), 116, 0.7);
+		this.drawCloud(110 - (this.physics.distanceMeters * 0.018 % 1200), 73, 1.05);
+		this.drawCloud(540 - (this.physics.distanceMeters * 0.01 % 1200), 116, 0.7);
 		this.drawDistantLandscape();
 		this.drawFields();
 		this.drawCatenary();
@@ -363,7 +337,7 @@ export class DriveScene implements Scene {
 			ctx.font = '600 15px system-ui, sans-serif';
 			ctx.fillText(`ASFA · ${SIGNAL_ASPECTS[activeSignal.aspect].label}`, 40, 46, 420);
 		}
-		if (this.emergencyBrake) {
+		if (this.physics.emergencyBrakeActive) {
 			ctx.fillStyle = 'rgba(137, 24, 35, 0.9)';
 			this.roundRect(width - 365, 22, 340, 38, 10);
 			ctx.fill();
@@ -405,7 +379,7 @@ export class DriveScene implements Scene {
 		ctx.beginPath();
 		ctx.moveTo(0, 260);
 		for (let x = -60; x <= width + 80; x += 110) {
-			const drift = this.distanceMeters * 0.04 % 110;
+			const drift = this.physics.distanceMeters * 0.04 % 110;
 			ctx.quadraticCurveTo(x + 50 - drift, 224 + Math.sin(x * 0.021) * 13, x + 110 - drift, 260);
 		}
 		ctx.lineTo(width, 337);
@@ -414,7 +388,7 @@ export class DriveScene implements Scene {
 		ctx.fill();
 
 		for (let i = 0; i < 7; i++) {
-			const x = (i * 179 + 62 - this.distanceMeters * 0.035 % 1240 + 1240) % 1240 - 120;
+			const x = (i * 179 + 62 - this.physics.distanceMeters * 0.035 % 1240 + 1240) % 1240 - 120;
 			const y = 250 + (i % 3) * 12;
 			this.drawTree(x, y, 0.45 + (i % 2) * 0.15);
 		}
@@ -444,7 +418,7 @@ export class DriveScene implements Scene {
 		ctx.fillRect(0, 266, width, 154);
 		for (let row = 0; row < 8; row++) {
 			const y = 277 + row * 15;
-			const drift = (this.distanceMeters * (0.045 + row * 0.012)) % 145;
+			const drift = (this.physics.distanceMeters * (0.045 + row * 0.012)) % 145;
 			ctx.strokeStyle = row % 2 ? 'rgba(246, 227, 157, 0.25)' : 'rgba(48, 120, 66, 0.22)';
 			ctx.lineWidth = 2;
 			ctx.beginPath();
@@ -455,7 +429,7 @@ export class DriveScene implements Scene {
 			ctx.stroke();
 		}
 		for (let i = 0; i < 16; i++) {
-			const x = (i * 97 - this.distanceMeters * 0.13 % 1100 + 1100) % 1100 - 50;
+			const x = (i * 97 - this.physics.distanceMeters * 0.13 % 1100 + 1100) % 1100 - 50;
 			const y = 285 + (i * 31 % 45);
 			ctx.fillStyle = i % 3 === 0 ? '#fff0a8' : '#fff8d5';
 			ctx.beginPath();
@@ -468,7 +442,7 @@ export class DriveScene implements Scene {
 		const ctx = this.ctx;
 		if (!ctx) return;
 		const width = ctx.canvas.width;
-		const phase = this.distanceMeters * 0.42 % 190;
+		const phase = this.physics.distanceMeters * 0.42 % 190;
 		for (let i = 0; i < 8; i++) {
 			const x = i * 190 - phase;
 			if (x < -40 || x > width + 40) continue;
@@ -510,7 +484,7 @@ export class DriveScene implements Scene {
 		ctx.fillStyle = '#817565';
 		ctx.fillRect(0, 329, width, 76);
 
-		const sleeperOffset = this.distanceMeters * 1.5 % 46;
+		const sleeperOffset = this.physics.distanceMeters * 1.5 % 46;
 		for (let x = -46 - sleeperOffset; x < width + 46; x += 46) {
 			ctx.fillStyle = '#51493f';
 			ctx.fillRect(x, 340, 30, 55);
@@ -534,7 +508,7 @@ export class DriveScene implements Scene {
 	private drawStationPlatform(): void {
 		const ctx = this.ctx;
 		if (!ctx || !this.to) return;
-		const x = 270 + (STATION_STOP_LINE_METERS - this.distanceMeters) * 0.35;
+		const x = 270 + (STATION_STOP_LINE_METERS - this.physics.distanceMeters) * 0.35;
 		if (x < -180 || x > ctx.canvas.width + 180) return;
 
 		ctx.fillStyle = '#d6d0bd';
@@ -566,7 +540,7 @@ export class DriveScene implements Scene {
 	private drawSignal(signal: Signal, index: number): void {
 		const ctx = this.ctx;
 		if (!ctx) return;
-		const distanceAhead = signal.distance - this.distanceMeters;
+		const distanceAhead = signal.distance - this.physics.distanceMeters;
 		const x = 620 + distanceAhead * 0.35;
 		if (x < -80 || x > ctx.canvas.width + 80) return;
 		const scale = Math.max(0.55, Math.min(1.18, 1.08 - distanceAhead / 2400));
