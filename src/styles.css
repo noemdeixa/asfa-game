@@ -325,9 +325,12 @@ canvas {
 .station-label-connector {
 	stroke: #d6a85f;
 	stroke-width: 1.25;
-	stroke-dasharray: 3 3;
 	stroke-linecap: round;
-	opacity: 0.9;
+	pointer-events: none;
+}
+
+.station-label-connectors,
+.station-labels {
 	pointer-events: none;
 }
 

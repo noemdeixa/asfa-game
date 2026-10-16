@@ -4,18 +4,28 @@ import { buildAdjacency, segmentDurationSec, type Neighbour } from '../domain/gr
 
 export type JourneyDifficulty = 'full-map' | 'nearby' | 'station-names';
 
-const MIN_LATITUDE = Math.min(...STATIONS.map(station => station.latitude));
-const MAX_LATITUDE = Math.max(...STATIONS.map(station => station.latitude));
-const MIN_LONGITUDE = Math.min(...STATIONS.map(station => station.longitude));
-const MAX_LONGITUDE = Math.max(...STATIONS.map(station => station.longitude));
 const MAP_WIDTH = 1000;
 const MAP_HEIGHT = 700;
 const MAP_STATION_MARGIN_X = 50;
 const MAP_STATION_MARGIN_Y = 85;
 const MAP_STATION_WIDTH = MAP_WIDTH - MAP_STATION_MARGIN_X * 2;
 const MAP_STATION_HEIGHT = MAP_HEIGHT - MAP_STATION_MARGIN_Y * 2;
+const CENTER_LATITUDE = (Math.min(...STATIONS.map(station => station.latitude))
+	+ Math.max(...STATIONS.map(station => station.latitude))) / 2;
+const LONGITUDE_SCALE = Math.cos(CENTER_LATITUDE * Math.PI / 180);
+const MIN_PROJECTED_LONGITUDE = Math.min(...STATIONS.map(station => station.longitude * LONGITUDE_SCALE));
+const MAX_PROJECTED_LONGITUDE = Math.max(...STATIONS.map(station => station.longitude * LONGITUDE_SCALE));
+const MIN_LATITUDE = Math.min(...STATIONS.map(station => station.latitude));
+const MAX_LATITUDE = Math.max(...STATIONS.map(station => station.latitude));
+const MAP_UNITS_PER_DEGREE = Math.min(
+	MAP_STATION_WIDTH / (MAX_PROJECTED_LONGITUDE - MIN_PROJECTED_LONGITUDE),
+	MAP_STATION_HEIGHT / (MAX_LATITUDE - MIN_LATITUDE),
+);
+const MAP_PAN_LEEWAY = 180;
 const MIN_ZOOM = 1;
 const MAX_ZOOM = 4;
+const STATION_LABEL_FONT_SIZE = 8;
+const STATION_LABEL_LINE_HEIGHT = 10;
 
 type StationLabel = {
 	x: number;
@@ -270,15 +280,13 @@ export class JourneyScene implements Scene {
 	}
 
 	private clampMapCenterX(center: number): number {
-		if (this.zoom <= MIN_ZOOM) return Math.max(0, Math.min(MAP_WIDTH, center));
 		const halfWidth = MAP_WIDTH / this.zoom / 2;
-		return Math.max(halfWidth, Math.min(MAP_WIDTH - halfWidth, center));
+		return Math.max(halfWidth - MAP_PAN_LEEWAY, Math.min(MAP_WIDTH - halfWidth + MAP_PAN_LEEWAY, center));
 	}
 
 	private clampMapCenterY(center: number): number {
-		if (this.zoom <= MIN_ZOOM) return Math.max(0, Math.min(MAP_HEIGHT, center));
 		const halfHeight = MAP_HEIGHT / this.zoom / 2;
-		return Math.max(halfHeight, Math.min(MAP_HEIGHT - halfHeight, center));
+		return Math.max(halfHeight - MAP_PAN_LEEWAY, Math.min(MAP_HEIGHT - halfHeight + MAP_PAN_LEEWAY, center));
 	}
 
 	private canPanMap(): boolean {
@@ -320,10 +328,11 @@ export class JourneyScene implements Scene {
 
 	private position(station: Station): { x: number; y: number } {
 		return {
-			x: MAP_STATION_MARGIN_X
-				+ ((station.longitude - MIN_LONGITUDE) / (MAX_LONGITUDE - MIN_LONGITUDE)) * MAP_STATION_WIDTH,
-			y: MAP_HEIGHT - MAP_STATION_MARGIN_Y
-				- ((station.latitude - MIN_LATITUDE) / (MAX_LATITUDE - MIN_LATITUDE)) * MAP_STATION_HEIGHT,
+			x: MAP_WIDTH / 2
+				+ (station.longitude * LONGITUDE_SCALE
+					- (MIN_PROJECTED_LONGITUDE + MAX_PROJECTED_LONGITUDE) / 2) * MAP_UNITS_PER_DEGREE,
+			y: MAP_HEIGHT / 2
+				- (station.latitude - (MIN_LATITUDE + MAX_LATITUDE) / 2) * MAP_UNITS_PER_DEGREE,
 		};
 	}
 
@@ -352,52 +361,104 @@ export class JourneyScene implements Scene {
 
 	private stationLabelPositions(): Map<string, StationLabel> {
 		const placements = new Map<string, StationLabel>();
-		const candidates = [
-			{ dx: 0, dy: -1, anchor: 'middle' },
-			{ dx: 1, dy: -0.7, anchor: 'start' },
-			{ dx: 1, dy: 0.25, anchor: 'start' },
-			{ dx: 1, dy: 1, anchor: 'start' },
-			{ dx: 0, dy: 1, anchor: 'middle' },
-			{ dx: -1, dy: 1, anchor: 'end' },
-			{ dx: -1, dy: 0.25, anchor: 'end' },
-			{ dx: -1, dy: -0.7, anchor: 'end' },
-		];
-		for (const station of STATIONS) {
+		const placedBounds: Array<{ left: number; right: number; top: number; bottom: number }> = [];
+		const stationPositions = new Map(STATIONS.map(station => [station.id, this.position(station)]));
+		const trackSegments = SEGMENTS.map(segment => ({
+			from: stationPositions.get(segment.from)!,
+			to: stationPositions.get(segment.to)!,
+		}));
+		const stations = [...STATIONS].sort((a, b) =>
+			(this.adjacency.get(b.id)?.length ?? 0) - (this.adjacency.get(a.id)?.length ?? 0)
+			|| b.name.length - a.name.length
+			|| a.id.localeCompare(b.id));
+
+		for (const station of stations) {
 			const { x, y } = this.position(station);
 			const lines = this.wrapStationLabel(station.name);
-			const width = Math.max(...lines.map(line => line.length)) * 7.5 + 8;
-			const height = lines.length * 16 + 4;
+			const width = Math.max(...lines.map(line => line.length)) * 4.5 + 8;
+			const height = lines.length * STATION_LABEL_LINE_HEIGHT + 4;
+			const boundsFor = (centerX: number, centerY: number) => ({
+				left: centerX - width / 2,
+				right: centerX + width / 2,
+				top: centerY - height / 2,
+				bottom: centerY + height / 2,
+			});
 			let bestPlacement: StationLabel | null = null;
+			let bestBounds: ReturnType<typeof boundsFor> | null = null;
 			let bestScore = Number.POSITIVE_INFINITY;
-			for (const distance of [18, 24, 32]) {
-				for (const candidate of candidates) {
-					const offsetX = candidate.dx * distance;
-					const centerX = candidate.anchor === 'start' ? x + offsetX + width / 2
-						: candidate.anchor === 'end' ? x + offsetX - width / 2
-						: x + offsetX;
-					const centerY = y + candidate.dy * distance;
-					const bounds = {
-						left: centerX - width / 2,
-						right: centerX + width / 2,
-						top: centerY - height / 2,
-						bottom: centerY + height / 2,
-					};
-					if (bounds.left < 4 || bounds.right > MAP_WIDTH - 4 || bounds.top < 4 || bounds.bottom > MAP_HEIGHT - 4) continue;
+			for (let directionIndex = 0; directionIndex < 24; directionIndex++) {
+				const angle = (directionIndex / 24) * Math.PI * 2;
+				const directionX = Math.cos(angle);
+				const directionY = Math.sin(angle);
+				const projectedHalfSize = Math.abs(directionX) * width / 2
+					+ Math.abs(directionY) * height / 2;
+				const minimumDistance = 9 + 8 + projectedHalfSize;
+
+				for (const extraDistance of [0, 10, 22, 38, 60, 88, 124, 168, 220]) {
+					const distance = minimumDistance + extraDistance;
+					const centerX = x + directionX * distance;
+					const centerY = y + directionY * distance;
+					const bounds = boundsFor(centerX, centerY);
+					if (bounds.left < -MAP_PAN_LEEWAY || bounds.right > MAP_WIDTH + MAP_PAN_LEEWAY
+						|| bounds.top < -MAP_PAN_LEEWAY || bounds.bottom > MAP_HEIGHT + MAP_PAN_LEEWAY) continue;
+
+					const labelOverlaps = placedBounds.filter(other =>
+						bounds.left < other.right + 3 && bounds.right + 3 > other.left
+						&& bounds.top < other.bottom + 3 && bounds.bottom + 3 > other.top).length;
 					const stationOverlaps = STATIONS.filter(other => {
 						if (other.id === station.id) return false;
-						const position = this.position(other);
-						return bounds.left < position.x + 18 && bounds.right > position.x - 18
-							&& bounds.top < position.y + 18 && bounds.bottom > position.y - 18;
+						const position = stationPositions.get(other.id)!;
+						return bounds.left < position.x + 13 && bounds.right > position.x - 13
+							&& bounds.top < position.y + 13 && bounds.bottom > position.y - 13;
 					}).length;
-					const score = stationOverlaps * 1000 + distance;
+					const linkOverlaps = trackSegments.filter(segment =>
+						this.segmentIntersectsBounds(
+							segment.from.x, segment.from.y, segment.to.x, segment.to.y, bounds,
+						)).length;
+					const score = labelOverlaps * 100000 + stationOverlaps * 20000
+						+ linkOverlaps * 10000 + extraDistance;
 					if (score >= bestScore) continue;
 					bestScore = score;
 					bestPlacement = { x: centerX, y: centerY, lines, width, height };
+					bestBounds = bounds;
 				}
 			}
-			if (bestPlacement) placements.set(station.id, bestPlacement);
+			if (bestPlacement && bestBounds) {
+				placements.set(station.id, bestPlacement);
+				placedBounds.push(bestBounds);
+			}
 		}
 		return placements;
+	}
+
+	private segmentIntersectsBounds(
+		x1: number,
+		y1: number,
+		x2: number,
+		y2: number,
+		bounds: { left: number; right: number; top: number; bottom: number },
+	): boolean {
+		const dx = x2 - x1;
+		const dy = y2 - y1;
+		let near = 0;
+		let far = 1;
+		const clips: Array<[number, number]> = [
+			[-dx, x1 - bounds.left],
+			[dx, bounds.right - x1],
+			[-dy, y1 - bounds.top],
+			[dy, bounds.bottom - y1],
+		];
+		for (const [direction, distance] of clips) {
+			if (direction === 0) {
+				if (distance < 0) return false;
+				continue;
+			}
+			const ratio = distance / direction;
+			if (direction < 0) near = Math.max(near, ratio);
+			else far = Math.min(far, ratio);
+			if (near > far) return false;
+		}
+		return true;
 	}
 
 	private renderSegments(): string {
@@ -408,60 +469,66 @@ export class JourneyScene implements Scene {
 			const from = this.position(a);
 			const to = this.position(b);
 			return `<line x1="${from.x}" y1="${from.y}" x2="${to.x}" y2="${to.y}"
-							stroke="#2f3a4d" stroke-width="4" />`;
+							stroke="#2f3a4d" stroke-width="2" />`;
 		}).join('');
 	}
 
 	private renderStations(): string {
 		const labels = this.difficulty === 'station-names' ? new Map() : this.stationLabelPositions();
-		return STATIONS.filter(s => this.isVisible(s)).map(s => {
-		const isCurrent = s.id === this.currentId;
-		const isObjective = s.id === this.objectiveId;
-		const isNeighbour = this.isNeighbour(s.id);
-		const { x, y } = this.position(s);
+		const stationNodes: string[] = [];
+		const connectors: string[] = [];
+		const labelBoxes: string[] = [];
 
-		const fill = isCurrent ? '#5eead4'
-					: isObjective ? '#f472b6'
-					: isNeighbour ? '#93c5fd'
-					: '#4a5568';
+		for (const station of STATIONS.filter(s => this.isVisible(s))) {
+			const isCurrent = station.id === this.currentId;
+			const isObjective = station.id === this.objectiveId;
+			const isNeighbour = this.isNeighbour(station.id);
+			const { x, y } = this.position(station);
+			const fill = isCurrent ? '#5eead4'
+				: isObjective ? '#f472b6'
+				: isNeighbour ? '#93c5fd'
+				: '#4a5568';
+			const canClick = this.difficulty !== 'station-names' && isNeighbour && !this.finished;
+			const cursor = canClick ? 'pointer' : 'default';
+			const interactionAttributes = canClick
+				? `role="button" tabindex="0" aria-label="Travel to ${station.name}"`
+				: '';
+			const label = labels.get(station.id);
 
-		const canClick = this.difficulty !== 'station-names' && isNeighbour && !this.finished;
-		const cursor = canClick ? 'pointer' : 'default';
-		const showName = this.difficulty !== 'station-names';
-		const interactionAttributes = canClick
-			? `role="button" tabindex="0" aria-label="Travel to ${s.name}"`
-			: '';
-		const label = labels.get(s.id);
-		let connector = '';
-		if (label) {
+			const nodeSize = 4;
+
+			stationNodes.push(`
+				<g class="station" data-id="${station.id}" style="cursor:${cursor}" ${interactionAttributes}>
+					${canClick ? `<circle cx="${x}" cy="${y}" r="14" fill="transparent" pointer-events="all" />` : ''}
+					<circle cx="${x}" cy="${y}" r="${nodeSize}" fill="${fill}" />
+				</g>`);
+
+			if (!label) continue;
+
 			const dx = label.x - x;
 			const dy = label.y - y;
 			const distance = Math.hypot(dx, dy);
-			const startScale = 9 / distance;
-			const endScale = Math.min(
-				(label.width / 2) / Math.max(Math.abs(dx), Number.EPSILON),
-				(label.height / 2) / Math.max(Math.abs(dy), Number.EPSILON),
-			);
-			connector = `<line x1="${x + dx * startScale}" y1="${y + dy * startScale}"
-				x2="${x + dx * endScale}" y2="${y + dy * endScale}" class="station-label-connector" />`;
+			const startScale = nodeSize / distance;
+
+			connectors.push(`<line x1="${x + dx * startScale}" y1="${y + dy * startScale}"
+				x2="${x + dx}" y2="${y + dy}" stroke-width="1" stroke-dasharray="2, 3" class="station-label-connector" />`);
+				
+			labelBoxes.push(`
+				<g class="station-label">
+					<rect x="${label.x - label.width / 2}" y="${label.y - label.height / 2}"
+						width="${label.width}" height="${label.height}" rx="4"
+						fill="#0e1118" stroke="#354253" stroke-width="1" />
+					<text x="${label.x}"
+						y="${label.y - ((label.lines.length - 1) * STATION_LABEL_LINE_HEIGHT) / 2 + STATION_LABEL_FONT_SIZE * 0.35}"
+						text-anchor="middle" font-size="${STATION_LABEL_FONT_SIZE}" fill="#e6e9ef">
+						${label.lines.map((line: string, index: number) => `<tspan x="${label.x}" dy="${index === 0 ? 0 : STATION_LABEL_LINE_HEIGHT}">${line}</tspan>`).join('')}
+					</text>
+				</g>`);
 		}
 
-		return `
-			<g class="station" data-id="${s.id}" style="cursor:${cursor}" ${interactionAttributes}>
-			${canClick ? `<circle cx="${x}" cy="${y}" r="24" fill="transparent" pointer-events="all" />` : ''}
-			<circle cx="${x}" cy="${y}" r="9" fill="${fill}" />
-			${showName && label ? `<g class="station-label">
-				${connector}
-				<rect x="${label.x - label.width / 2}" y="${label.y - label.height / 2}"
-					width="${label.width}" height="${label.height}" rx="4"
-					fill="#0e1118" stroke="#354253" stroke-width="1" />
-				<text x="${label.x}" y="${label.y - label.lines.length * 8 + 12}" text-anchor="middle" font-size="14" fill="#e6e9ef">
-					${label.lines.map((line: string, index: number) => `<tspan x="${label.x}" dy="${index === 0 ? 0 : 16}">${line}</tspan>`).join('')}
-				</text>
-			</g>` : ''}
-			</g>
-		`;
-		}).join('');
+		return `${stationNodes.join('')}
+			<g class="station-label-connectors">${connectors.join('')}</g>
+			<g class="station-labels">${labelBoxes.join('')}</g>`;
 	}
 
 	update(): void {}
