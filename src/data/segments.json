@@ -1,0 +1,27 @@
+[
+	{ "from": "mad", "to": "gua", "segmentTypes": ["AVE"] },
+	{ "from": "gua", "to": "sor", "segmentTypes": ["IBE"] },
+	{ "from": "gua", "to": "cal", "segmentTypes": ["AVE"] },
+	{ "from": "cal", "to": "zar", "segmentTypes": ["AVE"] },
+	{ "from": "zar", "to": "tad", "segmentTypes": ["AVE"] },
+	{ "from": "tad", "to": "hue", "segmentTypes": ["AVE"] },
+	{ "from": "zar", "to": "lle", "segmentTypes": ["AVE"] },
+	{ "from": "lle", "to": "tar", "segmentTypes": ["AVE"] },
+	{ "from": "tar", "to": "bar", "segmentTypes": ["AVE"] },
+	{ "from": "bar", "to": "gir", "segmentTypes": ["AVE"] },
+	{ "from": "gir", "to": "fig", "segmentTypes": ["AVE"] },
+	{ "from": "fig", "to": "per", "segmentTypes": ["AVE"] },
+
+	{ "from": "mad", "to": "seg", "segmentTypes": ["AVE"] },
+	{ "from": "seg", "to": "med", "segmentTypes": ["AVE"] },
+	{ "from": "med", "to": "zam", "segmentTypes": ["AVE"] },
+	{ "from": "zam", "to": "pue", "segmentTypes": ["AVE"] },
+	{ "from": "pue", "to": "gui", "segmentTypes": ["AVE"] },
+	{ "from": "gui", "to": "our", "segmentTypes": ["AVE"] },
+	{ "from": "our", "to": "san", "segmentTypes": ["AVE"] },
+	{ "from": "san", "to": "vil", "segmentTypes": ["AVE"] },
+	{ "from": "vil", "to": "pon", "segmentTypes": ["AVE"] },
+	{ "from": "pon", "to": "vig", "segmentTypes": ["AVE"] },
+	{ "from": "vig", "to": "opo", "segmentTypes": ["AVE"] },
+	{ "from": "san", "to": "cor", "segmentTypes": ["AVE"] }
+]

@@ -1,0 +1,28 @@
+[
+	{ "id": "mad", "name": "Madrid-Atocha", "latitude": 40.4066013, "longitude": -3.691982 },
+	{ "id": "gua", "name": "Guadalajara", "latitude": 40.6440843, "longitude": -3.1822527 },
+	{ "id": "sor", "name": "Soria", "latitude": 41.7553456, "longitude": -2.4756125 },
+	{ "id": "cal", "name": "Calatayud", "latitude": 41.3463614, "longitude": -1.6384166 },
+	{ "id": "zar", "name": "Zaragoza", "latitude": 41.6585732, "longitude": -0.9113881 },
+	{ "id": "tad", "name": "Tardienta", "latitude": 41.9755672, "longitude": -0.5384281 },
+	{ "id": "hue", "name": "Huesca", "latitude": 42.1327508, "longitude": -0.4098509 },
+	{ "id": "lle", "name": "Lleida", "latitude": 41.6207307, "longitude": 0.6330353 },
+	{ "id": "tar", "name": "Camp de Tarragona", "latitude": 41.1921725, "longitude": 1.2735682 },
+    { "id": "bar", "name": "Barcelona - Sants", "latitude": 41.3790068, "longitude": 2.1400042 },
+	{ "id": "gir", "name": "Girona", "latitude": 41.9791657, "longitude": 2.8162865 },
+	{ "id": "fig", "name": "Figueres", "latitude": 42.2650045, "longitude": 2.9689697 },
+	{ "id": "per", "name": "Perpignan", "latitude": 42.6962438, "longitude": 2.8796929 },
+	{ "id": "seg", "name": "Segovia", "latitude": 40.9103849, "longitude": -4.0949325 },
+	{ "id": "med", "name": "Medina del Campo", "latitude": 41.3172598, "longitude": -4.9096781 },
+	{ "id": "zam", "name": "Zamora", "latitude": 41.5160013, "longitude": -5.7397823 },
+	{ "id": "pue", "name": "Puebla de Sanabria", "latitude": 42.0455151, "longitude": -6.6269909 },
+	{ "id": "gui", "name": "A Guidiña-Porta de Galicia", "latitude": 42.063811, "longitude": -7.134359 },
+	{ "id": "our", "name": "Ourense-Empalme", "latitude": 42.350692, "longitude": -7.872551 },
+	{ "id": "san", "name": "Santiago de Compostela - Daniel Castelao", "latitude": 42.8704417, "longitude": -8.5451964 },
+	{ "id": "vil", "name": "Vilagarcía de Arousa", "latitude": 42.6019907, "longitude": -8.762284 },
+	{ "id": "pon", "name": "Pontevedra", "latitude": 42.421679, "longitude": -8.6354004 },
+	{ "id": "vig", "name": "Vigo-Urzáiz", "latitude": 42.2349637, "longitude": -8.7118996 },
+	{ "id": "opo", "name": "Oporto", "latitude": 40.3886401, "longitude": -3.7317242 },
+	{ "id": "cor", "name": "A Coruña", "latitude": 43.3525198, "longitude": -8.4099507 }
+	
+]
