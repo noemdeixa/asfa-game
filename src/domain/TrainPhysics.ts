@@ -10,6 +10,7 @@ const EMERGENCY_BRAKE_LIMIT_KMH = 125;
 export interface TrainPhysicsStep {
 	previousDistanceMeters: number;
 	emergencyBrakeActivated: boolean;
+	accelerationMps2: number;
 }
 
 /**
@@ -33,8 +34,12 @@ export class TrainPhysics {
 		return this.emergencyBrakeApplied;
 	}
 
-	reset(): void {
-		this.currentSpeedKmh = 0;
+	reset(initialSpeedKmh = 0): void {
+		if (!Number.isFinite(initialSpeedKmh) || initialSpeedKmh < 0
+			|| initialSpeedKmh > EMERGENCY_BRAKE_LIMIT_KMH) {
+			throw new RangeError(`Initial speed must be between 0 and ${EMERGENCY_BRAKE_LIMIT_KMH} km/h.`);
+		}
+		this.currentSpeedKmh = initialSpeedKmh;
 		this.currentDistanceMeters = 0;
 		this.emergencyBrakeApplied = false;
 	}
@@ -66,7 +71,11 @@ export class TrainPhysics {
 		// Average speed gives a better distance step than using either frame endpoint.
 		this.currentDistanceMeters += (speedMps + nextSpeedMps) / 2 * dt;
 
-		return { previousDistanceMeters, emergencyBrakeActivated };
+		return {
+			previousDistanceMeters,
+			emergencyBrakeActivated,
+			accelerationMps2: dt > 0 ? (nextSpeedMps - speedMps) / dt : 0,
+		};
 	}
 
 	stopAtStation(): void {

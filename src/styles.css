@@ -19,6 +19,11 @@ body {
 	padding: 1rem;
 }
 
+#app:has(.drive-scene),
+#app:has(#map) {
+	width: min(1360px, 100vw);
+}
+
 .scene {
 	display: flex;
 	flex-direction: column;
@@ -87,20 +92,52 @@ canvas {
 	color: #9ae6b4;
 }
 
-.drive-scene { width: 100%; }
+.drive-scene {
+	width: 100%;
+	gap: 0.85rem;
+	font-family: ui-rounded, system-ui, sans-serif;
+}
+
+.drive-heading {
+	display: flex;
+	flex-direction: column;
+	gap: 0.2rem;
+}
+
+.drive-heading h2 {
+	margin: 0;
+	color: #f9e9c8;
+	font-size: clamp(1.5rem, 4vw, 2.15rem);
+	letter-spacing: 0.02em;
+	text-shadow: 0 3px #473f62;
+}
+
+.drive-eyebrow {
+	color: #9bded6;
+	font-size: 0.7rem;
+	font-weight: 800;
+	letter-spacing: 0.16em;
+}
 
 .drive-route,
 .drive-prototype-note { margin: 0; }
 
+.drive-route {
+	color: #c7d8ed;
+	font-weight: 650;
+}
+
+.drive-route span { color: #ffc979; }
+
 .drive-prototype-note {
-	color: #f6d78d;
+	color: #b7c3d7;
 	font-size: 0.9rem;
 }
 
 .drive-readouts,
 .drive-controls {
 	display: flex;
-	gap: 1rem;
+	gap: 0.65rem;
 	align-items: center;
 	justify-content: center;
 	flex-wrap: wrap;
@@ -108,27 +145,64 @@ canvas {
 
 .drive-readouts {
 	width: 100%;
+}
+
+.drive-stat {
+	display: flex;
+	min-width: 175px;
+	flex-direction: column;
+	gap: 0.15rem;
+	padding: 0.6rem 0.9rem;
+	border: 2px solid #56617c;
+	border-radius: 10px;
+	background: #252e46;
+	box-shadow: 0 3px 0 #151a2a;
+	color: #b6c5dd;
+	font-size: 0.67rem;
+	font-weight: 750;
+	letter-spacing: 0.09em;
+}
+
+.drive-stat strong {
+	color: #fff0cf;
 	font-family: ui-monospace, monospace;
+	font-size: 1.1rem;
+	letter-spacing: 0;
+}
+
+.drive-stat small {
+	color: #b6c5dd;
+	font-size: 0.68rem;
 }
 
 .brake-state {
-	color: #9ae6b4;
+	padding: 0.65rem 0.85rem;
+	border: 2px solid #4b876e;
+	border-radius: 10px;
+	background: #d4f0d9;
+	color: #27634d;
 	font-weight: 700;
 }
 
 .brake-state:not(:empty) { min-width: 170px; }
 
+.brake-state.is-emergency {
+	border-color: #ad5361;
+	background: #ffe0d8;
+	color: #923847;
+}
+
 .drive-cab {
 	display: grid;
 	grid-template-columns: minmax(0, 1fr) 170px;
 	align-items: stretch;
-	gap: 0.6rem;
+	gap: 0.65rem;
 	width: 100%;
-	padding: 0.6rem;
-	border: 1px solid #3a4655;
-	border-radius: 12px;
-	background: linear-gradient(145deg, #25303d, #111923 72%);
-	box-shadow: 0 16px 38px rgba(0, 0, 0, 0.3), inset 0 1px rgba(255, 255, 255, 0.08);
+	padding: 0.65rem;
+	border: 2px solid #67738b;
+	border-radius: 15px;
+	background: linear-gradient(145deg, #394761, #242c42 72%);
+	box-shadow: 0 7px 0 #171d2d, 0 18px 38px rgba(0, 0, 0, 0.25);
 }
 
 #view {
@@ -136,35 +210,36 @@ canvas {
 	height: auto;
 	align-self: center;
 	aspect-ratio: 50 / 21;
-	border-radius: 8px;
-	border: 1px solid #536474;
-	box-shadow: inset 0 0 24px rgba(7, 18, 28, 0.25);
+	border-radius: 10px;
+	border: 2px solid #f0d8ac;
+	box-shadow: 0 3px 0 rgba(21, 28, 43, 0.55);
+	image-rendering: pixelated;
 }
 
 .cab-dashboard {
 	display: flex;
 	flex-direction: column;
 	align-items: center;
-	gap: 0.9rem;
+	gap: 0.75rem;
 	min-height: 0;
 	padding: 0.8rem 0.6rem;
-	border: 1px solid #485565;
-	border-radius: 9px;
-	background: linear-gradient(160deg, #303b47, #1a232d 68%);
-	box-shadow: inset 0 1px rgba(255, 255, 255, 0.08), 0 6px 16px rgba(0, 0, 0, 0.22);
+	border: 2px solid #74819a;
+	border-radius: 11px;
+	background: linear-gradient(160deg, #45516a, #29334a 68%);
+	box-shadow: inset 0 1px rgba(255, 255, 255, 0.12), 0 4px 0 #171d2d;
 }
 
 .dashboard-heading {
 	display: flex;
 	flex-direction: column;
 	gap: 0.15rem;
-	color: #9eacb9;
+	color: #bdc8d9;
 	font-size: 0.65rem;
 	letter-spacing: 0.12em;
 }
 
 .dashboard-heading span:first-child {
-	color: #78d9d2;
+	color: #92e7d7;
 	font-weight: 800;
 }
 
@@ -175,16 +250,16 @@ canvas {
 	gap: 0.25rem;
 	width: 100%;
 	padding: 0.55rem;
-	border: 1px solid #384e53;
-	border-radius: 6px;
-	background: #101c21;
-	color: #8db9ad;
+	border: 2px solid #5f897f;
+	border-radius: 8px;
+	background: #172a30;
+	color: #9bcec0;
 	font-size: 0.63rem;
 	letter-spacing: 0.1em;
 }
 
 .dashboard-display strong {
-	color: #a4f1bf;
+	color: #b6f4cb;
 	font-family: ui-monospace, monospace;
 	font-size: 1.7rem;
 	letter-spacing: 0;
@@ -208,7 +283,7 @@ canvas {
 	height: 175px;
 	flex-direction: column;
 	justify-content: space-between;
-	color: #9eacb9;
+	color: #bdc8d9;
 	font-size: 0.62rem;
 	white-space: nowrap;
 }
@@ -217,7 +292,7 @@ canvas {
 	width: 30px;
 	height: 180px;
 	margin: 0;
-	accent-color: #5eead4;
+	accent-color: #f1a5ae;
 	writing-mode: vertical-lr;
 	direction: rtl;
 	cursor: pointer;
@@ -231,20 +306,35 @@ canvas {
 	display: flex;
 	flex-direction: column;
 	gap: 0.2rem;
-	color: #b1bfca;
+	color: #c6d1e0;
 	font-size: 0.68rem;
 	letter-spacing: 0.08em;
 }
 
 .throttle-control label strong {
-	color: #e6e9ef;
+	color: #fff0cf;
 	font-family: ui-monospace, monospace;
 	font-size: 0.85rem;
 }
 
-#signal-status { color: #cbd5e1; }
+#signal-status { color: #d6dfeb; }
 
-.brake-state.is-emergency { color: #ff7d86; }
+.drive-controls button {
+	border: 2px solid #71809c;
+	border-radius: 9px;
+	background: #35415b;
+	box-shadow: 0 3px 0 #171d2d;
+}
+
+.drive-controls button:hover:not(:disabled) {
+	border-color: #f2c783;
+	background: #475675;
+}
+
+.drive-controls button:disabled {
+	opacity: 0.58;
+	cursor: not-allowed;
+}
 
 #arrival {
 	display: flex;

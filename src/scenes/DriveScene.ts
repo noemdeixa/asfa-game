@@ -1,4 +1,7 @@
 import type { Scene, SceneManager } from '../core/SceneManager';
+import heroineUrl from '../assets/heroine.png';
+import mountainBackgroundUrl from '../assets/bg_mountains.png';
+import trackBackgroundUrl from '../assets/bg_tracks.png';
 import { STATIONS, SEGMENTS, type Station } from '../data/network';
 import { createDemoSignals, SIGNAL_ASPECTS, type Signal, type SignalAuxiliaryLamp, type SignalLamp } from '../domain/signals';
 import { MAX_BRAKING_KN, MAX_TRACTION_KN, TrainPhysics } from '../domain/TrainPhysics';
@@ -10,11 +13,39 @@ interface DriveParams {
 	objectiveId: string;
 	difficulty: JourneyDifficulty;
 	elapsedSec: number;
+	returnToMenu?: boolean;
 }
 
-const STATION_STOP_LINE_METERS = 1200;
+interface WheelSpark {
+	x: number;
+	y: number;
+	vx: number;
+	vy: number;
+	lifeSec: number;
+	maxLifeSec: number;
+	size: number;
+}
+
+export const FIXED_DRIVE_DISTANCE_METERS = 1200;
+const TEST_STARTING_SPEED_KMH = 0;
 const STOP_LINE_TOLERANCE_METERS = 8;
 const STOP_SPEED_TOLERANCE_KMH = 1;
+const MOUNTAIN_PARALLAX_PIXELS_PER_METER = 0.08;
+const TRACK_SCROLL_PIXELS_PER_METER = 8;
+const TRAIN_REVEAL_SPEED_KMH = 90;
+const TRAIN_BOB_TIMES_SEC = [1.2, 5.1, 10.6, 14.4, 21.2, 25.8];
+const TRAIN_BOB_CYCLE_SEC = 33;
+const TRAIN_BOB_DURATION_SEC = 0.65;
+const TRAIN_BOB_HEIGHT = 1.5;
+const WHEEL_POSITIONS = [0.085, 0.2, 0.63, 0.75];
+const MAX_SPARKS = 160;
+const WHEEL_SPARK_VERTICAL_OFFSET_PX = 16;
+const MIN_SPARK_ACCELERATION_MPS2 = 0.015;
+const HARSH_ACCELERATION_THRESHOLD_MPS2 = 0.35;
+const HIGH_SPEED_ACCELERATION_THRESHOLD_KMH = 30;
+const MAX_SPARK_RATE_PER_SEC = 24;
+const HIGH_SPEED_ACCELERATION_SPARK_MULTIPLIER = 0.01;
+const TRACTION_SPARK_RATE_EXPONENT = 2;
 const SIGNAL_HEAD_TOP_OFFSET = 193;
 const LAMP_HEX: Record<SignalLamp['color'], string> = {
 	red: '#ff4b55',
@@ -30,6 +61,9 @@ function isJourneyDifficulty(value: unknown): value is JourneyDifficulty {
 export class DriveScene implements Scene {
 	private canvas: HTMLCanvasElement | null = null;
 	private ctx: CanvasRenderingContext2D | null = null;
+	private trainSprite = new Image();
+	private mountainSprite = new Image();
+	private trackSprite = new Image();
 	private manager: SceneManager;
 	private params: DriveParams | null = null;
 	private from: Station | null = null;
@@ -42,6 +76,7 @@ export class DriveScene implements Scene {
 	private recognitionFeedbackSec = 0;
 	private acknowledgedSignals = new Set<number>();
 	private signals: Signal[] = [];
+	private wheelSparks: WheelSpark[] = [];
 	private root: HTMLElement | null = null;
 
 	constructor(manager: SceneManager) {
@@ -51,13 +86,22 @@ export class DriveScene implements Scene {
 	enter(root: HTMLElement, params?: unknown): void {
 		if (typeof params !== 'object' || params === null || !('fromId' in params)
 			|| !('toId' in params) || !('objectiveId' in params) || !('difficulty' in params)
-			|| !('elapsedSec' in params)) {
+			|| !('elapsedSec' in params)
+			|| ('returnToMenu' in params && typeof params.returnToMenu !== 'boolean')) {
 			throw new Error('Drive scene requires journey parameters.');
 		}
 
-		const { fromId, toId, objectiveId, difficulty, elapsedSec } = params;
+		const { fromId, toId, objectiveId, difficulty, elapsedSec, returnToMenu = false } = params as {
+			fromId: unknown;
+			toId: unknown;
+			objectiveId: unknown;
+			difficulty: unknown;
+			elapsedSec: unknown;
+			returnToMenu?: unknown;
+		};
 		if (typeof fromId !== 'string' || typeof toId !== 'string' || typeof objectiveId !== 'string'
-			|| !isJourneyDifficulty(difficulty) || typeof elapsedSec !== 'number' || !Number.isFinite(elapsedSec)) {
+			|| !isJourneyDifficulty(difficulty) || typeof elapsedSec !== 'number' || !Number.isFinite(elapsedSec)
+			|| typeof returnToMenu !== 'boolean') {
 			throw new Error('Drive scene received invalid journey parameters.');
 		}
 
@@ -70,41 +114,46 @@ export class DriveScene implements Scene {
 		this.root = root;
 		this.from = from;
 		this.to = to;
-		this.params = { fromId, toId, objectiveId, difficulty, elapsedSec };
+		this.params = { fromId, toId, objectiveId, difficulty, elapsedSec, returnToMenu };
 		this.throttle = 0;
-		this.physics.reset();
+		this.physics.reset(TEST_STARTING_SPEED_KMH);
 		this.driveElapsedSec = 0;
 		this.arrivedAtStation = false;
 		this.missedStation = false;
 		this.recognitionFeedbackSec = 0;
 		this.acknowledgedSignals.clear();
+		this.wheelSparks = [];
 		this.signals = createDemoSignals();
+		this.trainSprite.src = heroineUrl;
+		this.mountainSprite.src = mountainBackgroundUrl;
+		this.trackSprite.src = trackBackgroundUrl;
 
 		root.innerHTML = `
 			<div class="scene drive-scene">
-				<h2>Driving to ${to.name}</h2>
-				<p class="drive-route">${from.name} to ${to.name} · ASFA proof of concept</p>
-				<p class="drive-prototype-note">Signal aspects use a simplified block sequence. ASFA behavior is a proof of concept, not operational rules.</p>
+				<header class="drive-heading">
+
+					<p class="drive-route">${from.name} <span aria-hidden="true">-></span> ${to.name}</p>
+				</header>
 				<div class="drive-readouts">
-					<div>Speed <strong id="speed">0</strong> km/h</div>
-					<div>Distance <strong id="distance">0</strong> / ${STATION_STOP_LINE_METERS} m to station</div>
-					<div id="brake-state" class="brake-state" aria-live="polite">Traction available</div>
+					<div class="drive-stat"><span>STATION APPROACH</span><strong><span id="distance">0</span><small> / ${FIXED_DRIVE_DISTANCE_METERS} m</small></strong></div>
+					<div id="brake-state" class="brake-state" aria-live="polite">ASFA OK!</div>
 				</div>
 				<div class="drive-cab">
-					<canvas id="view" width="1000" height="420" aria-label="Side-scrolling train view with simplified block signals approaching from the right"></canvas>
+					<canvas id="view" width="1000" height="420" aria-label="Pixel-art city hopper train driven by a chibi woman, passing city scenery and railway signals"></canvas>
 					<div class="cab-dashboard">
-						<div class="dashboard-heading"><span>ASFA DIGITAL</span><span>Cab controls</span></div>
+						<div class="dashboard-heading"><span>Driver controls</span></div>
 						<div class="dashboard-display">
-							<span>VELOCIDAD</span>
+							<span>TRAIN SPEED</span>
 							<strong><span id="cab-speed">0</span><small> km/h</small></strong>
 						</div>
 						<div class="throttle-control">
-							<div class="throttle-scale"><span>+${MAX_TRACTION_KN} kN</span><span>0</span><span>−${MAX_BRAKING_KN} kN</span></div>
+							<div class="throttle-scale"><span>GO +${MAX_TRACTION_KN}</span><span>COAST</span><span>BRAKE -${MAX_BRAKING_KN}</span></div>
 							<input id="throttle" type="range" min="-100" max="100" step="1" value="0" aria-label="Combined traction and braking lever">
-							<label for="throttle">TRACCIÓN / FRENO <strong id="throttle-value">0 kN · coast</strong></label>
+							<label for="throttle">POWER LEVER <strong id="throttle-value">0 kN · coast</strong></label>
 						</div>
 					</div>
 				</div>
+				<p class="drive-prototype-note">Watch for signals and bring your train to a gentle stop at the platform.</p>
 				<div class="drive-controls">
 					<button id="recognize" disabled>ASFA · Reconocer señal</button>
 					<button id="reset-brake" hidden>Rearmar freno de emergencia</button>
@@ -113,7 +162,7 @@ export class DriveScene implements Scene {
 				<div id="station-warning" class="station-warning" role="status" hidden></div>
 				<div id="station-outcome" class="journey-banner drive-outcome" hidden>
 					<strong id="station-outcome-message"></strong>
-					<button id="continue">Continue journey</button>
+					<button id="continue">${returnToMenu ? 'Finish drive' : 'Continue journey'}</button>
 				</div>
 				<button id="menu">Back to menu</button>
 			</div>
@@ -169,13 +218,17 @@ export class DriveScene implements Scene {
 		if (resetButton) resetButton.hidden = true;
 		if (throttleInput) throttleInput.disabled = false;
 		if (brakeState) {
-			brakeState.textContent = 'Traction available';
+			brakeState.textContent = 'ASFA OK!';
 			brakeState.classList.remove('is-emergency');
 		}
 	}
 
 	private arrive(): void {
 		if (!this.params || !this.from || !this.to) return;
+		if (this.params.returnToMenu) {
+			this.manager.switchTo('menu', { difficulty: this.params.difficulty });
+			return;
+		}
 		this.manager.switchTo('journey', {
 			...this.params,
 			currentId: this.to.id,
@@ -226,8 +279,13 @@ export class DriveScene implements Scene {
 	}
 
 	update(dt: number): void {
-		if (!this.root || this.arrivedAtStation) return;
-		const { previousDistanceMeters, emergencyBrakeActivated } = this.physics.update(dt, this.throttle);
+		if (!this.root) return;
+		if (this.arrivedAtStation) {
+			this.updateWheelSparks(dt);
+			return;
+		}
+		const { previousDistanceMeters, emergencyBrakeActivated, accelerationMps2 } =
+			this.physics.update(dt, this.throttle);
 		if (emergencyBrakeActivated) {
 			this.throttle = 0;
 			const throttleInput = this.root.querySelector<HTMLInputElement>('#throttle');
@@ -238,22 +296,23 @@ export class DriveScene implements Scene {
 			}
 			if (throttleValue) throttleValue.textContent = this.leverDescription();
 		}
+		this.updateWheelSparks(dt, accelerationMps2);
 		if (this.physics.emergencyBrakeActive && this.physics.speedKmh === 0) {
 			const resetButton = this.root.querySelector<HTMLButtonElement>('#reset-brake');
 			if (resetButton) resetButton.hidden = false;
 		}
 		this.driveElapsedSec += dt;
 		// A frame may cross the stopping marker, so judge both its endpoints.
-		if (!this.missedStation && previousDistanceMeters < STATION_STOP_LINE_METERS
-			&& this.physics.distanceMeters >= STATION_STOP_LINE_METERS) {
+		if (!this.missedStation && previousDistanceMeters < FIXED_DRIVE_DISTANCE_METERS
+			&& this.physics.distanceMeters >= FIXED_DRIVE_DISTANCE_METERS) {
 			if (this.physics.speedKmh <= STOP_SPEED_TOLERANCE_KMH
-				&& Math.abs(this.physics.distanceMeters - STATION_STOP_LINE_METERS) <= STOP_LINE_TOLERANCE_METERS) {
+				&& Math.abs(this.physics.distanceMeters - FIXED_DRIVE_DISTANCE_METERS) <= STOP_LINE_TOLERANCE_METERS) {
 				this.completeStationStop();
 			} else {
 				this.markStationMissed();
 			}
 		} else if (!this.missedStation && this.physics.speedKmh <= STOP_SPEED_TOLERANCE_KMH
-			&& Math.abs(this.physics.distanceMeters - STATION_STOP_LINE_METERS) <= STOP_LINE_TOLERANCE_METERS) {
+			&& Math.abs(this.physics.distanceMeters - FIXED_DRIVE_DISTANCE_METERS) <= STOP_LINE_TOLERANCE_METERS) {
 			this.completeStationStop();
 		}
 		const speed = this.root.querySelector<HTMLElement>('#speed');
@@ -268,9 +327,7 @@ export class DriveScene implements Scene {
 		if (cabSpeed) cabSpeed.textContent = Math.round(this.physics.speedKmh).toString();
 		if (distance) distance.textContent = Math.round(this.physics.distanceMeters).toString();
 		if (brakeState && this.physics.emergencyBrakeActive) {
-			brakeState.textContent = this.physics.speedKmh > 0
-				? 'FRENO DE EMERGENCIA · BRAKING'
-				: 'FRENO DE EMERGENCIA · STOPPED';
+			brakeState.textContent = 'FRENO DE EMERGENCIA';
 			brakeState.classList.add('is-emergency');
 		}
 
@@ -292,7 +349,7 @@ export class DriveScene implements Scene {
 				message.textContent = `Stopped beyond ${this.to.name}. The station stop was missed.`;
 			}
 			const continueButton = this.root.querySelector<HTMLButtonElement>('#continue');
-			if (continueButton) continueButton.textContent = 'Continue journey';
+			if (continueButton) continueButton.textContent = this.params?.returnToMenu ? 'Finish drive' : 'Continue journey';
 			if (recognizeButton) recognizeButton.disabled = true;
 		}
 	}
@@ -303,27 +360,15 @@ export class DriveScene implements Scene {
 		if (!ctx || !canvas) return;
 		const { width, height } = canvas;
 
+		ctx.imageSmoothingEnabled = false;
 		ctx.clearRect(0, 0, width, height);
-		const sky = ctx.createLinearGradient(0, 0, 0, 270);
-		sky.addColorStop(0, '#80c7f3');
-		sky.addColorStop(0.72, '#d5effa');
-		sky.addColorStop(1, '#ffe6ba');
-		ctx.fillStyle = sky;
-		ctx.fillRect(0, 0, width, height);
-
-		ctx.fillStyle = 'rgba(255, 239, 178, 0.92)';
-		ctx.beginPath();
-		ctx.arc(805, 67, 34, 0, Math.PI * 2);
-		ctx.fill();
-		this.drawCloud(110 - (this.physics.distanceMeters * 0.018 % 1200), 73, 1.05);
-		this.drawCloud(540 - (this.physics.distanceMeters * 0.01 % 1200), 116, 0.7);
-		this.drawDistantLandscape();
-		this.drawFields();
-		this.drawCatenary();
-		this.drawTrack();
-		this.drawStationPlatform();
-		this.signals.forEach((signal, index) => this.drawSignal(signal, index));
+		this.drawMountainBackground();
+		this.drawTrackBackground();
+		// this.drawCatenary();
+		// this.drawStationPlatform();
+		// this.signals.forEach((signal, index) => this.drawSignal(signal, index));
 		this.drawTrain();
+		this.drawWheelSparks();
 		this.drawCabFrame();
 
 		const activeIndex = this.activeSignalIndex();
@@ -349,92 +394,27 @@ export class DriveScene implements Scene {
 		}
 	}
 
-	private drawCloud(x: number, y: number, scale: number): void {
+	private drawMountainBackground(): void {
 		const ctx = this.ctx;
-		if (!ctx) return;
-		ctx.fillStyle = 'rgba(255, 255, 255, 0.78)';
-		ctx.beginPath();
-		ctx.ellipse(x, y, 34 * scale, 15 * scale, 0, Math.PI, 0);
-		ctx.ellipse(x + 28 * scale, y - 9 * scale, 24 * scale, 21 * scale, 0, Math.PI, 0);
-		ctx.ellipse(x + 55 * scale, y - 2 * scale, 36 * scale, 17 * scale, 0, Math.PI, 0);
-		ctx.fill();
+		const image = this.mountainSprite;
+		if (!ctx || !image.complete || image.naturalWidth === 0) return;
+		const scale = ctx.canvas.height / image.naturalHeight;
+		const imageWidth = image.naturalWidth * scale;
+		const maxOffset = Math.max(0, imageWidth - ctx.canvas.width);
+		const offsetX = -Math.min(maxOffset, this.physics.distanceMeters * MOUNTAIN_PARALLAX_PIXELS_PER_METER);
+		ctx.drawImage(image, offsetX, 0, imageWidth, ctx.canvas.height);
 	}
 
-	private drawDistantLandscape(): void {
+	private drawTrackBackground(): void {
 		const ctx = this.ctx;
-		if (!ctx) return;
-		const width = ctx.canvas.width;
-		ctx.fillStyle = '#a5c7bb';
-		ctx.beginPath();
-		ctx.moveTo(0, 236);
-		for (let x = -80; x <= width + 100; x += 35) {
-			const peak = 181 + Math.sin((x + 80) * 0.012) * 19 + Math.sin(x * 0.027) * 9;
-			ctx.lineTo(x, peak);
-		}
-		ctx.lineTo(width, 302);
-		ctx.lineTo(0, 302);
-		ctx.closePath();
-		ctx.fill();
-		ctx.fillStyle = '#8ec478';
-		ctx.beginPath();
-		ctx.moveTo(0, 260);
-		for (let x = -60; x <= width + 80; x += 110) {
-			const drift = this.physics.distanceMeters * 0.04 % 110;
-			ctx.quadraticCurveTo(x + 50 - drift, 224 + Math.sin(x * 0.021) * 13, x + 110 - drift, 260);
-		}
-		ctx.lineTo(width, 337);
-		ctx.lineTo(0, 337);
-		ctx.closePath();
-		ctx.fill();
-
-		for (let i = 0; i < 7; i++) {
-			const x = (i * 179 + 62 - this.physics.distanceMeters * 0.035 % 1240 + 1240) % 1240 - 120;
-			const y = 250 + (i % 3) * 12;
-			this.drawTree(x, y, 0.45 + (i % 2) * 0.15);
-		}
-	}
-
-	private drawTree(x: number, y: number, scale: number): void {
-		const ctx = this.ctx;
-		if (!ctx) return;
-		ctx.fillStyle = '#735747';
-		ctx.fillRect(x - 3 * scale, y - 19 * scale, 6 * scale, 24 * scale);
-		ctx.fillStyle = '#347b55';
-		ctx.beginPath();
-		ctx.arc(x, y - 25 * scale, 14 * scale, 0, Math.PI * 2);
-		ctx.arc(x - 10 * scale, y - 17 * scale, 10 * scale, 0, Math.PI * 2);
-		ctx.arc(x + 10 * scale, y - 17 * scale, 10 * scale, 0, Math.PI * 2);
-		ctx.fill();
-	}
-
-	private drawFields(): void {
-		const ctx = this.ctx;
-		if (!ctx) return;
-		const width = ctx.canvas.width;
-		const field = ctx.createLinearGradient(0, 275, 0, 420);
-		field.addColorStop(0, '#95c96c');
-		field.addColorStop(1, '#c9a760');
-		ctx.fillStyle = field;
-		ctx.fillRect(0, 266, width, 154);
-		for (let row = 0; row < 8; row++) {
-			const y = 277 + row * 15;
-			const drift = (this.physics.distanceMeters * (0.045 + row * 0.012)) % 145;
-			ctx.strokeStyle = row % 2 ? 'rgba(246, 227, 157, 0.25)' : 'rgba(48, 120, 66, 0.22)';
-			ctx.lineWidth = 2;
-			ctx.beginPath();
-			for (let x = -145 - drift; x < width + 120; x += 145) {
-				ctx.moveTo(x, y);
-				ctx.lineTo(x + 112, y);
-			}
-			ctx.stroke();
-		}
-		for (let i = 0; i < 16; i++) {
-			const x = (i * 97 - this.physics.distanceMeters * 0.13 % 1100 + 1100) % 1100 - 50;
-			const y = 285 + (i * 31 % 45);
-			ctx.fillStyle = i % 3 === 0 ? '#fff0a8' : '#fff8d5';
-			ctx.beginPath();
-			ctx.arc(x, y, 2.5, 0, Math.PI * 2);
-			ctx.fill();
+		const image = this.trackSprite;
+		if (!ctx || !image.complete || image.naturalWidth === 0) return;
+		const scale = ctx.canvas.height / image.naturalHeight;
+		const tileWidth = image.naturalWidth * scale;
+		const offsetX = -(this.physics.distanceMeters * TRACK_SCROLL_PIXELS_PER_METER % tileWidth);
+		const offsetY = 22;
+		for (let x = offsetX; x < ctx.canvas.width; x += tileWidth) {
+			ctx.drawImage(image, x, offsetY, tileWidth, ctx.canvas.height);
 		}
 	}
 
@@ -475,40 +455,10 @@ export class DriveScene implements Scene {
 		ctx.stroke();
 	}
 
-	private drawTrack(): void {
-		const ctx = this.ctx;
-		if (!ctx) return;
-		const { width } = ctx.canvas;
-		ctx.fillStyle = '#ad9877';
-		ctx.fillRect(0, 320, width, 100);
-		ctx.fillStyle = '#817565';
-		ctx.fillRect(0, 329, width, 76);
-
-		const sleeperOffset = this.physics.distanceMeters * 1.5 % 46;
-		for (let x = -46 - sleeperOffset; x < width + 46; x += 46) {
-			ctx.fillStyle = '#51493f';
-			ctx.fillRect(x, 340, 30, 55);
-			ctx.fillStyle = 'rgba(214, 192, 155, 0.3)';
-			ctx.fillRect(x + 3, 343, 3, 48);
-		}
-
-		for (const y of [343, 391]) {
-			const rail = ctx.createLinearGradient(0, y - 5, 0, y + 7);
-			rail.addColorStop(0, '#f1f5ee');
-			rail.addColorStop(0.35, '#aebdc0');
-			rail.addColorStop(0.55, '#697c83');
-			rail.addColorStop(1, '#dbe3dc');
-			ctx.fillStyle = rail;
-			ctx.fillRect(0, y - 5, width, 11);
-			ctx.fillStyle = 'rgba(255,255,255,0.76)';
-			ctx.fillRect(0, y - 5, width, 2);
-		}
-	}
-
 	private drawStationPlatform(): void {
 		const ctx = this.ctx;
 		if (!ctx || !this.to) return;
-		const x = 270 + (STATION_STOP_LINE_METERS - this.physics.distanceMeters) * 0.35;
+		const x = 270 + (FIXED_DRIVE_DISTANCE_METERS - this.physics.distanceMeters) * 0.35;
 		if (x < -180 || x > ctx.canvas.width + 180) return;
 
 		ctx.fillStyle = '#d6d0bd';
@@ -678,59 +628,106 @@ export class DriveScene implements Scene {
 
 	private drawTrain(): void {
 		const ctx = this.ctx;
-		if (!ctx) return;
-		const x = 92;
-		const y = 267;
+		const bounds = this.trainBounds();
+		if (!ctx || !bounds) return;
+		ctx.drawImage(this.trainSprite, bounds.x, bounds.y, bounds.width, bounds.height);
+	}
 
-		ctx.fillStyle = 'rgba(52, 55, 46, 0.25)';
-		ctx.beginPath();
-		ctx.ellipse(x + 84, 339, 96, 10, 0, 0, Math.PI * 2);
-		ctx.fill();
-		ctx.fillStyle = '#23495b';
-		ctx.fillRect(x + 15, y + 37, 144, 35);
-		ctx.fillStyle = '#e8f2f1';
-		ctx.beginPath();
-		ctx.moveTo(x, y + 46);
-		ctx.lineTo(x + 25, y + 14);
-		ctx.quadraticCurveTo(x + 34, y + 3, x + 52, y + 3);
-		ctx.lineTo(x + 143, y + 3);
-		ctx.quadraticCurveTo(x + 161, y + 3, x + 169, y + 23);
-		ctx.lineTo(x + 178, y + 46);
-		ctx.lineTo(x + 178, y + 67);
-		ctx.lineTo(x, y + 67);
-		ctx.closePath();
-		ctx.fill();
-		ctx.fillStyle = '#2496bd';
-		ctx.beginPath();
-		ctx.moveTo(x + 34, y + 16);
-		ctx.lineTo(x + 145, y + 16);
-		ctx.lineTo(x + 157, y + 41);
-		ctx.lineTo(x + 19, y + 41);
-		ctx.closePath();
-		ctx.fill();
-		ctx.fillStyle = '#d5f6ff';
-		ctx.beginPath();
-		ctx.moveTo(x + 41, y + 19);
-		ctx.lineTo(x + 70, y + 19);
-		ctx.lineTo(x + 70, y + 36);
-		ctx.lineTo(x + 29, y + 36);
-		ctx.closePath();
-		ctx.fill();
-		ctx.fillStyle = '#17303b';
-		for (const wheelX of [x + 42, x + 125]) {
-			ctx.beginPath();
-			ctx.arc(wheelX, y + 71, 10, 0, Math.PI * 2);
-			ctx.fill();
-			ctx.fillStyle = '#afc2c2';
-			ctx.beginPath();
-			ctx.arc(wheelX, y + 71, 4, 0, Math.PI * 2);
-			ctx.fill();
-			ctx.fillStyle = '#17303b';
+	private trainBounds(): { x: number; y: number; width: number; height: number } | null {
+		const ctx = this.ctx;
+		if (!ctx || !this.trainSprite.complete || this.trainSprite.naturalWidth === 0) return null;
+		const aspectRatio = this.trainSprite.naturalWidth / this.trainSprite.naturalHeight;
+		const width = Math.min(540, ctx.canvas.width - 16, (ctx.canvas.height - 16) * aspectRatio);
+		const height = width * this.trainSprite.naturalHeight / this.trainSprite.naturalWidth;
+		const reveal = Math.max(0, Math.min(1, this.physics.speedKmh / TRAIN_REVEAL_SPEED_KMH));
+
+		const trainWidth = Math.min(
+			540,
+			ctx.canvas.width - 16,
+			(ctx.canvas.height - 16) * aspectRatio,
+		);
+
+		const maxX = 0;
+		const minX = -(trainWidth - 160);
+
+		const x = minX + (maxX - minX) * reveal;
+		const bobPhase = this.driveElapsedSec % TRAIN_BOB_CYCLE_SEC;
+		const bobStart = TRAIN_BOB_TIMES_SEC.find(time =>
+			bobPhase >= time && bobPhase < time + TRAIN_BOB_DURATION_SEC,
+		);
+		const bobProgress = bobStart === undefined ? 0 : (bobPhase - bobStart) / TRAIN_BOB_DURATION_SEC;
+		const bob = this.physics.speedKmh > 0
+			? Math.sin(bobProgress * Math.PI) * TRAIN_BOB_HEIGHT
+			: 0;
+		const y = Math.min(ctx.canvas.height - height - 8, Math.max(8, ctx.canvas.height - height - 10 + bob));
+		return { x, y, width, height };
+	}
+
+	private updateWheelSparks(dt: number, accelerationMps2 = 0): void {
+		for (const spark of this.wheelSparks) {
+			spark.lifeSec -= dt;
+			spark.x += spark.vx * dt;
+			spark.y += spark.vy * dt;
+			spark.vy += 100 * dt;
 		}
-		ctx.fillStyle = '#fff1aa';
-		ctx.beginPath();
-		ctx.arc(x + 170, y + 47, 4, 0, Math.PI * 2);
-		ctx.fill();
+		this.wheelSparks = this.wheelSparks.filter(spark => spark.lifeSec > 0);
+
+		const speedFactor = Math.min(1, this.physics.speedKmh / 20);
+		const accelerationMagnitude = Math.abs(accelerationMps2);
+		const isBraking = this.throttle < 0 || this.physics.emergencyBrakeActive;
+		const isForwardAcceleration = this.throttle > 0 && accelerationMps2 > 0;
+		const highSpeedAcceleration = isForwardAcceleration
+			&& this.physics.speedKmh > HIGH_SPEED_ACCELERATION_THRESHOLD_KMH;
+		const minimumAcceleration = isBraking || highSpeedAcceleration
+			? MIN_SPARK_ACCELERATION_MPS2
+			: isForwardAcceleration
+				? HARSH_ACCELERATION_THRESHOLD_MPS2
+				: Number.POSITIVE_INFINITY;
+		const tractionFactor = Math.pow(this.throttle / 100, TRACTION_SPARK_RATE_EXPONENT);
+		const accelerationSparkMultiplier = isBraking
+			? 1
+			: tractionFactor * (highSpeedAcceleration ? HIGH_SPEED_ACCELERATION_SPARK_MULTIPLIER : 1);
+		const sparkRate = accelerationMagnitude < minimumAcceleration
+			? 0
+			: Math.min(MAX_SPARK_RATE_PER_SEC, accelerationMagnitude * 40)
+				* speedFactor * accelerationSparkMultiplier;
+		if (sparkRate === 0 || Math.random() >= 1 - Math.exp(-sparkRate * dt)) return;
+
+		const bounds = this.trainBounds();
+		const ctx = this.ctx;
+		if (!bounds || !ctx) return;
+		const wheelX = WHEEL_POSITIONS[Math.floor(Math.random() * WHEEL_POSITIONS.length)];
+		if (wheelX === undefined) return;
+		const x = bounds.x + bounds.width * wheelX;
+		const y = bounds.y + bounds.height * 0.8 - WHEEL_SPARK_VERTICAL_OFFSET_PX;
+		if (x < 0 || x > ctx.canvas.width || y < 0 || y > ctx.canvas.height) return;
+
+		const count = 4 + Math.floor(Math.random() * 5);
+		for (let i = 0; i < count && this.wheelSparks.length < MAX_SPARKS; i++) {
+			this.wheelSparks.push({
+				x,
+				y,
+				vx: -35 - Math.random() * 90,
+				vy: -25 - Math.random() * 100,
+				lifeSec: 0.12 + Math.random() * 0.2,
+				maxLifeSec: 0.32,
+				size: 1.5 + Math.random() * 2,
+			});
+		}
+	}
+
+	private drawWheelSparks(): void {
+		const ctx = this.ctx;
+		if (!ctx) return;
+		for (const spark of this.wheelSparks) {
+			const alpha = Math.max(0, spark.lifeSec / spark.maxLifeSec);
+			ctx.globalAlpha = alpha;
+			ctx.fillStyle = '#fff2a6';
+			ctx.fillRect(spark.x, spark.y, spark.size, spark.size);
+			ctx.fillStyle = '#ff9d43';
+			ctx.fillRect(spark.x - 1, spark.y + 1, spark.size, Math.max(1, spark.size - 1));
+		}
+		ctx.globalAlpha = 1;
 	}
 
 	private roundRect(x: number, y: number, width: number, height: number, radius: number): void {
