@@ -10,6 +10,7 @@ const MAP_STATION_MARGIN_X = 50;
 const MAP_STATION_MARGIN_Y = 85;
 const MAP_STATION_WIDTH = MAP_WIDTH - MAP_STATION_MARGIN_X * 2;
 const MAP_STATION_HEIGHT = MAP_HEIGHT - MAP_STATION_MARGIN_Y * 2;
+const MAP_PROJECTION_SCALE = 1.2;
 const CENTER_LATITUDE = (Math.min(...STATIONS.map(station => station.latitude))
 	+ Math.max(...STATIONS.map(station => station.latitude))) / 2;
 const LONGITUDE_SCALE = Math.cos(CENTER_LATITUDE * Math.PI / 180);
@@ -20,9 +21,9 @@ const MAX_LATITUDE = Math.max(...STATIONS.map(station => station.latitude));
 const MAP_UNITS_PER_DEGREE = Math.min(
 	MAP_STATION_WIDTH / (MAX_PROJECTED_LONGITUDE - MIN_PROJECTED_LONGITUDE),
 	MAP_STATION_HEIGHT / (MAX_LATITUDE - MIN_LATITUDE),
-);
+) * MAP_PROJECTION_SCALE;
 const MAP_PAN_LEEWAY = 180;
-const MIN_ZOOM = 1;
+const MIN_ZOOM = 0.8;
 const MAX_ZOOM = 4;
 const STATION_LABEL_FONT_SIZE = 8;
 const STATION_LABEL_LINE_HEIGHT = 10;
