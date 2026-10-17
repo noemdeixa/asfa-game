@@ -417,7 +417,7 @@ export class DriveScene implements Scene {
 			ctx.drawImage(image, x, offsetY, tileWidth, ctx.canvas.height);
 		}
 	}
-	/*
+	
 	private drawCatenary(): void {
 		const ctx = this.ctx;
 		if (!ctx) return;
@@ -616,7 +616,7 @@ export class DriveScene implements Scene {
 		ctx.lineWidth = 1;
 		ctx.stroke();
 	}
-	*/
+	
 	private drawCabFrame(): void {
 		const ctx = this.ctx;
 		if (!ctx) return;
