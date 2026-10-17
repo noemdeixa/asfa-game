@@ -57,5 +57,73 @@
 	{ "from": "ill", "to": "ala", "segmentTypes": ["AVE"] },
 	{ "from": "ala", "to": "elx", "segmentTypes": ["AVE"] },
 	{ "from": "elx", "to": "ori", "segmentTypes": ["AVE"] },
-	{ "from": "ori", "to": "mur", "segmentTypes": ["AVE"] }
+	{ "from": "ori", "to": "mur", "segmentTypes": ["AVE"] },
+
+	{ "from": "cas", "to": "tar", "segmentTypes": ["IBE"] },
+
+	{ "from": "mad", "to": "ila", "segmentTypes": ["IBE"] },
+	{ "from": "seg", "to": "ila", "segmentTypes": ["IBE"] },
+	{ "from": "med", "to": "ila", "segmentTypes": ["IBE"] },
+	{ "from": "vll", "to": "ila", "segmentTypes": ["IBE"] },
+	{ "from": "sal", "to": "ila", "segmentTypes": ["IBE"] },
+	{ "from": "sal", "to": "med", "segmentTypes": ["IBE"] },
+
+	{ "from": "mad", "to": "pla", "segmentTypes": ["IBE"] },
+	{ "from": "mad", "to": "cac", "segmentTypes": ["IBE"] },
+	{ "from": "pla", "to": "cac", "segmentTypes": ["IBE"] },
+	{ "from": "cac", "to": "mer", "segmentTypes": ["IBE"] },
+	{ "from": "uer", "to": "mer", "segmentTypes": ["IBE"] },
+	{ "from": "mer", "to": "bad", "segmentTypes": ["IBE"] },
+	{ "from": "mer", "to": "sev", "segmentTypes": ["IBE"] },
+	{ "from": "mer", "to": "uel", "segmentTypes": ["IBE"] },
+	{ "from": "sev", "to": "uel", "segmentTypes": ["IBE"] },
+	{ "from": "sev", "to": "cad", "segmentTypes": ["IBE"] },
+	{ "from": "ant", "to": "alg", "segmentTypes": ["IBE"] },
+	{ "from": "mal", "to": "fue", "segmentTypes": ["IBE"] },
+
+	{ "from": "jul", "to": "lin", "segmentTypes": ["IBE"] },
+	{ "from": "gra", "to": "lin", "segmentTypes": ["IBE"] },
+	{ "from": "jae", "to": "lin", "segmentTypes": ["IBE"] },
+	{ "from": "alc", "to": "lin", "segmentTypes": ["IBE"] },
+
+	{ "from": "mad", "to": "alc", "segmentTypes": ["IBE"] },
+	{ "from": "alb", "to": "alc", "segmentTypes": ["IBE"] },
+	{ "from": "alb", "to": "mur", "segmentTypes": ["IBE"] },
+	{ "from": "alb", "to": "val", "segmentTypes": ["IBE"] },
+	{ "from": "alb", "to": "gan", "segmentTypes": ["IBE"] },
+	{ "from": "val", "to": "gan", "segmentTypes": ["IBE"] },
+	{ "from": "ill", "to": "gan", "segmentTypes": ["IBE"] },
+
+	{ "from": "mur", "to": "lor", "segmentTypes": ["IBE"] },
+	{ "from": "lor", "to": "agu", "segmentTypes": ["IBE"] },
+	{ "from": "mur", "to": "car", "segmentTypes": ["IBE"] },
+
+	{ "from": "ter", "to": "zar", "segmentTypes": ["IBE"] },
+	{ "from": "ter", "to": "cas", "segmentTypes": ["IBE"] },
+	{ "from": "ter", "to": "val", "segmentTypes": ["IBE"] },
+
+	{ "from": "zar", "to": "ebr", "segmentTypes": ["IBE"] },
+	{ "from": "log", "to": "ebr", "segmentTypes": ["IBE"] },
+	{ "from": "pam", "to": "ebr", "segmentTypes": ["IBE"] },
+
+	{ "from": "bur", "to": "mir", "segmentTypes": ["IBE"] },
+	{ "from": "log", "to": "mir", "segmentTypes": ["IBE"] },
+	{ "from": "mir", "to": "vit", "segmentTypes": ["IBE"] },
+	{ "from": "pam", "to": "vit", "segmentTypes": ["IBE"] },
+	{ "from": "vit", "to": "don", "segmentTypes": ["IBE"] },
+	{ "from": "pam", "to": "don", "segmentTypes": ["IBE"] },
+	{ "from": "don", "to": "iru", "segmentTypes": ["IBE"] },
+
+	{ "from": "mir", "to": "bil", "segmentTypes": ["IBE"] },
+	{ "from": "pal", "to": "nta", "segmentTypes": ["IBE"] },
+	{ "from": "lug", "to": "our", "segmentTypes": ["IBE"] },
+	{ "from": "lug", "to": "leo", "segmentTypes": ["IBE"] },
+	{ "from": "lug", "to": "bet", "segmentTypes": ["IBE"] },
+	{ "from": "bet", "to": "fer", "segmentTypes": ["IBE"] },
+	{ "from": "bet", "to": "cor", "segmentTypes": ["IBE"] },
+	{ "from": "fer", "to": "cor", "segmentTypes": ["IBE"] },
+	{ "from": "vig", "to": "our", "segmentTypes": ["IBE"] },
+
+	{ "from": "vll", "to": "bur", "segmentTypes": ["IBE"] },
+	{ "from": "vll", "to": "med", "segmentTypes": ["IBE"] }
 ]
