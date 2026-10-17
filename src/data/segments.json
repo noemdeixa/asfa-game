@@ -85,6 +85,9 @@
 	{ "from": "gra", "to": "lin", "segmentTypes": ["IBE"] },
 	{ "from": "jae", "to": "lin", "segmentTypes": ["IBE"] },
 	{ "from": "alc", "to": "lin", "segmentTypes": ["IBE"] },
+	{ "from": "via", "to": "lin", "segmentTypes": ["IBE"] },
+	{ "from": "via", "to": "gra", "segmentTypes": ["IBE"] },
+
 
 	{ "from": "mad", "to": "alc", "segmentTypes": ["IBE"] },
 	{ "from": "alb", "to": "alc", "segmentTypes": ["IBE"] },

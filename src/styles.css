@@ -375,9 +375,10 @@ canvas {
 #map {
 	width: 100%;
 	height: auto;
-	border-radius: 8px;
-	background: #0b1017;
-	border: 1px solid #2a3444;
+	border-radius: 4px;
+	background: #111820;
+	border: 1px solid #2c3742;
+	box-shadow: 0 3px 14px rgba(0, 0, 0, 0.24);
 }
 
 #map.is-draggable {
@@ -412,14 +413,33 @@ canvas {
 	pointer-events: none;
 }
 
-.station-label-connector {
-	stroke: #d6a85f;
-	stroke-width: 1.25;
+.track-segment {
+	stroke: #4a5865;
+	stroke-width: 1.5;
 	stroke-linecap: round;
-	pointer-events: none;
 }
 
-.station-label-connectors,
+.station-label text {
+	fill: #d5dde6;
+	stroke: #111820;
+	stroke-width: 3px;
+	stroke-linejoin: round;
+	paint-order: stroke;
+	font-size: 10px;
+	font-weight: 500;
+	letter-spacing: 0;
+	transition: fill 120ms ease, font-weight 120ms ease;
+}
+
+.station.is-highlighted circle:last-child {
+	filter: drop-shadow(0 0 5px #f6cc68);
+}
+
+.station-label.is-highlighted text {
+	fill: #ffe29a;
+	font-weight: 700;
+}
+
 .station-labels {
 	pointer-events: none;
 }
